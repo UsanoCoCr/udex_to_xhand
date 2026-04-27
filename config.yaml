@@ -5,7 +5,7 @@ udcap:
 
 xhand:
   protocol: "RS485"
-  serial_port: "/dev/ttyUSB0"
+  serial_port: "/dev/ttyACM0"
   baud_rate: 3000000
   left_hand_id: 0
   right_hand_id: 1

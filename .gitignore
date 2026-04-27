@@ -32,8 +32,6 @@ config.local.yaml
 URDF/
 udcap关节文档/
 xhand_control_ros2/
-xhand_control_sdk_py/
 xhand中文文档/
-docs/
 SPEC.md
 CLAUDE.md

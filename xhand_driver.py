@@ -34,7 +34,7 @@ class XHandDriver:
 
         self._device = self._sdk.XHandControl()
 
-        port = config.get("serial_port", "/dev/ttyUSB0")
+        port = config.get("serial_port", "/dev/ttyACM0")
         baud = int(config.get("baud_rate", 3000000))
 
         rsp = self._device.open_serial(port, baud)
@@ -109,6 +109,7 @@ class XHandDriver:
             self._device.send_command(hid, self._command)
         print("Shutdown: mode=0 (passive)")
 
+        time.sleep(0.1)
         self._device.close_device()
         self._device = None
         print("Device closed.")
