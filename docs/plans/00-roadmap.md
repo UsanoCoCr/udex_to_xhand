@@ -54,7 +54,7 @@ python udcap_receiver.py --port 9000 --duration 10
 
 ---
 
-## M2: UDCAP 参数实验验证
+## M2: UDCAP 参数实验验证 ✅
 
 **目标**: 确认 l0-l23 每个参数对应哪根手指的哪个关节。SPEC.md §3.1 的映射表是假设，此步骤验证。
 
@@ -62,6 +62,13 @@ python udcap_receiver.py --port 9000 --duration 10
 - 编写 `scripts/udcap_param_identify.py`：实时显示所有参数值，高亮变化量 >5° 的参数
 - 操作流程：逐根手指单独弯曲，记录哪些 l-index 响应
 - 输出：更新 `config.yaml` 中的 mapping.left / mapping.right
+- **实际完成方式**: 找到官方文档 ([JSON SDK 手册](https://udexreal.gitbook.io/udexreal-docs/docs-cn/c++-python-sdk/json-c++python-sdk-guan-jie-jiao-du-shi-yong-shou-ce))，提供了权威的参数映射，替代了实验数据。实验脚本保留用于未来验证。
+
+**关键发现** (vs SPEC.md 假设):
+- 参数排序: DIP→PIP→MCP (远端→近端)，非 SPEC 假设的近端→远端
+- l20-l22 = MCP Roll (拇指/食指/小指)，**不是**手腕参数
+- l23 = 手势识别标志 (始终-1)，不是关节
+- JSON SDK 中**没有手腕参数**
 
 **完成定义**: 产出一份已验证的参数映射表（写入 config.yaml），每个 l0-l23 都有明确的手指-关节-轴对应，附实验截图或日志。
 
@@ -75,6 +82,7 @@ python scripts/udcap_param_identify.py --port 9000
 ```
 
 **依赖**: M1
+**ADRs**: 009 (docs over experiment), 010 (no wrist params), 011 (DIP-first ordering), 012 (5 params discarded), 013 (thumb roll non-contiguous)
 
 ---
 
