@@ -1,0 +1,51 @@
+udcap:
+  host: "0.0.0.0"
+  port: 9000
+  timeout_ms: 200
+
+xhand:
+  protocol: "RS485"
+  serial_port: "/dev/ttyUSB0"
+  baud_rate: 3000000
+  left_hand_id: 0
+  right_hand_id: 1
+  control_mode: 3          # 0=passive, 3=position, 5=force
+  default_kp: 100
+  default_ki: 0
+  default_kd: 0
+  default_tor_max: 300
+  update_rate_hz: 100
+
+# Per-joint mapping: UDCAP 24 → XHand 12
+# sources: UDCAP parameter indices to combine
+# weights: weight per source (must sum to ~1.0)
+# sign: multiplier to handle sign convention (UDCAP negative=flexion, XHand positive=flexion)
+# offset: degrees, added after weighted sum
+# clamp: [min_deg, max_deg] before deg→rad conversion
+mapping:
+  left:
+    thumb_bend:    { sources: [0, 3, 4], weights: [0.4, 0.3, 0.3], sign: -1, offset: 0, clamp: [-10, 110] }
+    thumb_rota1:   { sources: [1],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 110] }
+    thumb_rota2:   { sources: [2],       weights: [1.0],            sign:  1, offset: 0, clamp: [0, 50] }
+    index_bend:    { sources: [6],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 30] }
+    index_joint1:  { sources: [5],       weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
+    index_joint2:  { sources: [7, 8],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
+    mid_joint1:    { sources: [9],       weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
+    mid_joint2:    { sources: [11, 12],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
+    ring_joint1:   { sources: [13],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
+    ring_joint2:   { sources: [15, 16],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
+    pinky_joint1:  { sources: [17],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
+    pinky_joint2:  { sources: [19, 20],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
+  right:
+    thumb_bend:    { sources: [0, 3, 4], weights: [0.4, 0.3, 0.3], sign: -1, offset: 0, clamp: [-10, 110] }
+    thumb_rota1:   { sources: [1],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 110] }
+    thumb_rota2:   { sources: [2],       weights: [1.0],            sign:  1, offset: 0, clamp: [0, 50] }
+    index_bend:    { sources: [6],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 30] }
+    index_joint1:  { sources: [5],       weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
+    index_joint2:  { sources: [7, 8],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
+    mid_joint1:    { sources: [9],       weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
+    mid_joint2:    { sources: [11, 12],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
+    ring_joint1:   { sources: [13],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
+    ring_joint2:   { sources: [15, 16],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
+    pinky_joint1:  { sources: [17],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
+    pinky_joint2:  { sources: [19, 20],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
