@@ -1,3 +1,0 @@
-xhand_control:
-  ros__parameters:
-    update_rate: 100.0  # Hz
