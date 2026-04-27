@@ -114,7 +114,7 @@ python xhand_driver.py --port /dev/ttyACM0 --actions fist,palm,v,ok
 
 ---
 
-## M4: 单手实时遥操
+## M4: 单手实时遥操 ✅
 
 **目标**: 首次端到端真实遥操——一只手套控制一只 XHand。
 
@@ -136,13 +136,14 @@ python main.py --config config.yaml --hand left
 ```
 
 **验证清单**:
-- [ ] 拇指弯曲 → J0 跟随，J1/J2 不动
-- [ ] 食指弯曲 → J4/J5 跟随，其余不动
-- [ ] 中/无/小指同理
-- [ ] 握拳 → XHand 握拳
-- [ ] 张开 → XHand 张开
+- [x] 拇指弯曲 → J0 跟随，J1/J2 不动
+- [x] 食指弯曲 → J4/J5 跟随，其余不动
+- [x] 中/无/小指同理
+- [x] 握拳 → XHand 握拳
+- [x] 张开 → XHand 张开
 
 **依赖**: M1, M2, M3
+**ADRs**: 020 (degree-domain clamping), 021 (two-layer clamping), 022 (JOINT_ORDER constant)
 
 ---
 
