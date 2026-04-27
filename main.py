@@ -11,7 +11,7 @@ import time
 import yaml
 
 from joint_mapper import JointMapper
-from safety import STUB_LIMITS, clamp
+from safety import HARD_LIMITS_RAD, clamp
 from udcap_receiver import UdcapReceiver
 from xhand_driver import XHandDriver
 
@@ -52,13 +52,13 @@ def main():
 
                 if args.hand in ("left", "both"):
                     left_12 = mapper.map("left", data["left"])
-                    left_12 = clamp(left_12, STUB_LIMITS)
+                    left_12 = clamp(left_12, HARD_LIMITS_RAD)
                     driver.send("left", left_12)
                     parts.append(f"L: {fmt_joints(left_12)}")
 
                 if args.hand in ("right", "both"):
                     right_12 = mapper.map("right", data["right"])
-                    right_12 = clamp(right_12, STUB_LIMITS)
+                    right_12 = clamp(right_12, HARD_LIMITS_RAD)
                     driver.send("right", right_12)
                     parts.append(f"R: {fmt_joints(right_12)}")
 

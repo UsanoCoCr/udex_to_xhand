@@ -122,7 +122,7 @@ python xhand_driver.py --port /dev/ttyACM0 --actions fist,palm,v,ok
 - `joint_mapper.py`: 实现 config.yaml 驱动的映射（加权求和 + 符号翻转 + 度→弧度 + clamp）
 - 接入真实 UDP + 真实 XHand driver
 - 基于 M2 的验证结果填写正确的 mapping 参数
-- 先做左手（或右手，取决于硬件方便）
+- 先做左手
 
 **完成定义**: 戴手套弯曲每根手指，XHand 对应手指跟随弯曲，方向正确，无明显反向或串扰。
 
@@ -251,15 +251,15 @@ M0 (skeleton)
 
 ## 时间估算
 
-| Milestone | 估算 | 累计 |
-|-----------|------|------|
-| M0 Skeleton | 0.5d | 0.5d |
-| M1 UDP Receiver | 0.5d | 1d |
-| M2 Param Verify | 0.5d | 1.5d |
-| M3 XHand Driver | 0.5d | 2d |
-| M4 Single-hand Teleop | 1d | 3d |
-| M5 Safety | 0.5d | 3.5d |
-| M6 Dual Hand | 0.5d | 4d |
-| M7 Tuning + Acceptance | 1d | 5d |
+| Milestone              | 估算 | 累计 |
+| ---------------------- | ---- | ---- |
+| M0 Skeleton            | 0.5d | 0.5d |
+| M1 UDP Receiver        | 0.5d | 1d   |
+| M2 Param Verify        | 0.5d | 1.5d |
+| M3 XHand Driver        | 0.5d | 2d   |
+| M4 Single-hand Teleop  | 1d   | 3d   |
+| M5 Safety              | 0.5d | 3.5d |
+| M6 Dual Hand           | 0.5d | 4d   |
+| M7 Tuning + Acceptance | 1d   | 5d   |
 
 M1 和 M3 无依赖关系，可并行。最快路径: **4 天**。
