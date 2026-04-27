@@ -32,7 +32,7 @@ python main.py --mock --duration 3
 
 ---
 
-## M1: Real UDP Receiver
+## M1: Real UDP Receiver ✅
 
 **目标**: 替换 UDP stub，接收 UDCAP 真实数据。
 

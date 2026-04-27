@@ -47,24 +47,22 @@ def main():
             tick += 1
 
             data = receiver.receive()
-            if data is None:
-                continue
+            if data is not None:
+                parts = []
 
-            parts = []
+                if args.hand in ("left", "both"):
+                    left_12 = mapper.map("left", data["left"])
+                    left_12 = clamp(left_12, STUB_LIMITS)
+                    driver.send("left", left_12)
+                    parts.append(f"L: {fmt_joints(left_12)}")
 
-            if args.hand in ("left", "both"):
-                left_12 = mapper.map("left", data["left"])
-                left_12 = clamp(left_12, STUB_LIMITS)
-                driver.send("left", left_12)
-                parts.append(f"L: {fmt_joints(left_12)}")
+                if args.hand in ("right", "both"):
+                    right_12 = mapper.map("right", data["right"])
+                    right_12 = clamp(right_12, STUB_LIMITS)
+                    driver.send("right", right_12)
+                    parts.append(f"R: {fmt_joints(right_12)}")
 
-            if args.hand in ("right", "both"):
-                right_12 = mapper.map("right", data["right"])
-                right_12 = clamp(right_12, STUB_LIMITS)
-                driver.send("right", right_12)
-                parts.append(f"R: {fmt_joints(right_12)}")
-
-            print(f"[tick {tick:03d}] {' '.join(parts)}")
+                print(f"[tick {tick:03d}] {' '.join(parts)}")
 
             if args.duration and (t_loop - t_start) >= args.duration:
                 break
@@ -79,6 +77,7 @@ def main():
 
     elapsed = time.monotonic() - t_start
     print(f"Exited after {elapsed:.1f}s, {tick} ticks")
+    receiver.close()
     driver.close()
 
 
