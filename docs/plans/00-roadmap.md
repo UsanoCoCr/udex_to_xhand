@@ -3,6 +3,7 @@
 ## Revision History
 
 - 2026-05-16 — 第 1 次修订 — 部署主机切换到宇树 G1 PC2 (aarch64)；新增 M5 (Port to G1 PC2)，原 M5/M6/M7 顺延为 M6/M7/M8。详见 [ADR-023](../decisions/023-roadmap-pivot-g1-pc2-as-host.md).
+- 2026-05-16 — 第 2 次修订 — 发现厂商提供的是 `xhand_control_sdk/` (aarch64 **C++** SDK + headers + .so)，**没有 Python wheel**。M5 阻塞解除；决定弃用 Python 算法栈，**在 PC2 上把 M1/M3/M4 的 Python 模块整体重写为单一 C++ 二进制**，避免 Python↔C++ FFI 跨语言开销，并匹配仓库内 `xhand_control_ros2.hpp` 的语言基线。`config.yaml`/ADRs/example.json 等已验证资产保留。M5 拆为 M5a/M5b/M5c，工期估算 0.5d → 2d。CLAUDE.md / SPEC.md 中的 Python 基线需在 M5 完成后同步更新。
 
 ---
 
@@ -153,52 +154,89 @@ python main.py --config config.yaml --hand left
 
 ---
 
-## M5: Port to G1 PC2
+## M5: Port to G1 PC2 (C++ 重写底层栈)
 
-**目标**: 将 M0–M4 已验证的栈从外置 Linux 开发 PC 迁移到宇树 G1 板载 PC2 (aarch64 Linux)。迁移完成后 PC2 成为唯一部署目标，外置 PC 仅作开发 / 备用。
+**目标**: 在 G1 PC2 (aarch64 Linux) 上把 M0–M4 验证过的算法栈用 C++ 重写为单一可执行二进制 `udex_to_xhand`，取代 main.py + 全部 Python 模块。迁移完成后 PC2 成为唯一部署目标，外置 PC 仅作开发 / 备用。
 
-**前置硬关卡**:
-- 获取或编译匹配 aarch64 的 `xhand_controller` wheel
-- 不可用则 M5 阻塞，需单独 ADR 决策（vendor 协助 / 源码编译 / 回退外置 PC）
+**为什么是 C++ 重写而不是 Python 绑定**:
+- 厂商当前在 aarch64 上仅交付 **C++ SDK** (`xhand_control_sdk/`: headers + `libxhand_control.so` ELF aarch64)，无 Python wheel
+- 若用 pybind11 / ctypes 包一层，等于在 100Hz 实时控制循环里凭空插入一段 Python↔C++ FFI 开销
+- 仓库内 reference (`xhand_control_ros2.hpp:68-72`) 已是 C++，语言基线一致
+
+**前置已解锁**:
+- `xhand_control_sdk/lib/libxhand_control.so` 确认为 ELF 64-bit ARM aarch64 ✅
+- `xhand_control.hpp` 暴露了 M3/M4 所需的全部接口 (`open_serial` / `list_hands_id` / `get_hand_type` / `send_command` / `read_state` / `close_device` / `get_sdk_version`)
+- `data_type.hpp` 定义 `HandCommand_t` / 12×`FingerCommand_t` / `HandState_t`，与 SPEC.md §中假设一致
+- 之前的「aarch64 wheel 缺失」blocker **不再适用**
+
+**保留资产 (不重做)**:
+- `config.yaml`: M2/M4 已验证的 mapping / PID / clamp 参数 — C++ 侧用 yaml-cpp 解析
+- 全部 ADRs 009-022 (硬件行为级决策，与实现语言无关，照常生效)
+- `example.json` (M0 mock 输入)
 
 **内容**:
-- PC2 上确认 Python 3.10+，建 conda 环境，安装 aarch64 版 xhand_controller wheel
-- XHand 接 PC2 USB，验证 `/dev/ttyACM*` 枚举 + dialout 串口权限
-- 配置网络路径：Windows UDCAP → G1 网络 → PC2（静态 IP / 防火墙放行）
-- 在 PC2 上重跑 M3 验收（fist/palm/V/OK）
-- 在 PC2 上重跑 M4 验收（单手实时跟随，方向正确）
 
-**完成定义**: 在 PC2 上单手实时跟随通过，latency 与外置 PC 上 M4 基线相比 ±5ms 内。
+### M5a · C++ SDK 在 PC2 上原生验证 (0.5d)
+- PC2 安装依赖: `cmake g++ libcurl4-openssl-dev libssl-dev nlohmann-json3-dev libyaml-cpp-dev`
+- 编译厂商示例: `cd xhand_control_sdk/tests && mkdir build && cd build && cmake .. && make`
+- 配置 `/dev/ttyACM*` 串口权限 (dialout 组), 运行 `./test_serial` (注意厂商示例默认 `/dev/ttyUSB0`，按 ADR-014 改为 `/dev/ttyACM0`)
+- 验收: 能枚举 hand_id、显示 type/SN、单关节 send_command 成功 → 证明硬件 + .so 在 PC2 上闭环可用
+
+### M5b · 项目 C++ 化 (1d)
+- 新建 `src/` + 顶层 `CMakeLists.txt` (`find_package(xhand_control HINTS xhand_control_sdk/share)`)，产出 `udex_to_xhand` 可执行文件
+- 重写以下模块（对应 Python 文件功能逐一翻译，行为不变）:
+  - `main.cpp`: 100Hz 控制循环 + SIGINT/SIGTERM 处理 + CLI args (`--config`, `--hand`, `--duration`, `--mock`)
+  - `udcap_receiver.{hpp,cpp}`: 非阻塞 UDP socket，nlohmann_json 解析，提取 l0-l23 / r0-r23，CalibStatus!=3 跳帧
+  - `joint_mapper.{hpp,cpp}`: yaml-cpp 读 `config.yaml`，加权求和 + 符号翻转 + deg→rad + clamp
+  - `xhand_driver.{hpp,cpp}`: 包装 `xhand_control::XHandControl`（open_serial → list_hands_id → send_command → close_device）
+  - `safety.{hpp,cpp}`: watchdog (200ms 无 UDP) + per-joint clamp 作为 fail-safe
+- 单元级验收: `--mock` 模式以 ~100Hz 打印左右手 12 关节值 (等价于原 Python M0 stub 验收)
+
+### M5c · PC2 上重跑 M3 / M4 验收 (0.5d)
+- XHand 接 PC2 USB，确认 `/dev/ttyACM*` 枚举 (ADR-014)
+- 网络: Windows UDCAP → G1 网络 → PC2（静态 IP + 防火墙放行 UDP 9000）
+- 重跑 M3 验收: fist / palm / V / OK 四个动作 (C++ 版本)
+- 重跑 M4 验收: 戴手套单手实时跟随，方向正确，无明显延迟
+
+**完成定义**: PC2 上单手实时跟随通过，latency 与外置 PC 上 Python 版 M4 基线相比改善或在 ±5ms 内（C++ 版本预期等好或更稳）。
 
 ```bash
-# 在 G1 PC2 上 (aarch64 Linux), conda activate xhand
-python xhand_driver.py --port /dev/ttyACM0 --actions fist,palm,v,ok
-# 预期: 与 M3 验收输出一致
+# M5a: 厂商 C++ SDK 原生验证
+cd xhand_control_sdk/tests && mkdir -p build && cd build
+cmake .. && make
+./test_serial   # 预期: list_hands_id 非空, type=Left/Right, 单关节命令生效
 
-python main.py --config config.yaml --hand left
-# 预期: 与 M4 验收一致, latency 在 dev PC 基线 ±5ms 内
+# M5b: 编译本项目 C++ 二进制
+cd <repo-root> && mkdir -p build && cd build
+cmake .. && make
+ls ./udex_to_xhand   # 预期: ELF aarch64 可执行文件
+
+# M5c: PC2 上 M3 / M4 复跑
+./udex_to_xhand --port /dev/ttyACM0 --actions fist,palm,v,ok
+./udex_to_xhand --config config.yaml --hand left
 ```
 
-**依赖**: M4（算法栈已验证）, G1 PC2 已刷 Linux, aarch64 SDK wheel 可用
-**ADRs**: 023 (pivot to G1 PC2)
+**依赖**: M4 (Python 版算法已验证，`config.yaml` 数据已校准), G1 PC2 已刷 Linux, `xhand_control_sdk/` 已就绪 ✅
+**ADRs**: 023 (pivot to G1 PC2); **待新增** ADR (M5 实施时记录: 选择纯 C++ 重写而非 pybind11/ctypes binding 的理由 — FFI 成本、reference 语言一致性、deployment 简化)
+**Post-M5 文档同步**: 完成后需更新 CLAUDE.md (Python 3.10+ 基线 → C++17 + cmake)、SPEC.md、README 中关于运行命令与依赖的部分
 
 ---
 
-## M6: Safety Layer
+## M6: Safety Layer (C++)
 
-**目标**: 加入所有安全机制，使系统可以无人值守运行。
+**目标**: 在 M5b 的 C++ 二进制基础上，把 M5b 里只是占位的安全模块强化到可无人值守运行。所有安全逻辑都在 `src/safety.{hpp,cpp}` 实现。
 
 **内容**:
-- Watchdog: 200ms 无 UDP → hold 最后位置 + 日志告警
-- Joint clamp: 按 config.yaml 中 per-joint [min, max] 钳位
-- Graceful shutdown: Ctrl+C 或 SIGTERM → mode=0 → close_device (ADR-023: PC2 lifecycle 可能被外部管理)
-- 启动检查: hand_id 验证 + CalibrationStatus == 3
+- Watchdog: 200ms 无 UDP → hold 最后位置 + 日志告警 (基于 `std::chrono::steady_clock`)
+- Joint clamp: 按 `config.yaml` 中 per-joint [min, max] 钳位 (mapper 已做主钳位，safety 做 fail-safe 二次钳位，ADR-021)
+- Graceful shutdown: `std::signal(SIGINT/SIGTERM, …)` → `xhand_control.send_command(mode=0)` → `close_device()` (ADR-018, ADR-023)
+- 启动检查: `list_hands_id()` 非空 + `get_hand_type()` 一致 + 等待首个有效 UDP 包内 CalibrationStatus == 3
 
 **完成定义**: 以下故障场景全部通过。
 
 ```bash
 # 测试 1: Watchdog
-python main.py --config config.yaml --hand left
+./udex_to_xhand --config config.yaml --hand left
 # → 运行中关闭 UDCAP 软件
 # 预期: 终端 200ms 后打印 "WATCHDOG: no UDP for 200ms, holding position"
 #        XHand 保持最后姿态不动
@@ -218,11 +256,11 @@ python main.py --config config.yaml --hand left
 # 预期: XHand 食指停在 30° 位置不继续弯
 ```
 
-**依赖**: M5 (PC2 部署已通过)
+**依赖**: M5 (C++ 二进制在 PC2 上跑通)
 
 ---
 
-## M7: 双手集成
+## M7: 双手集成 (C++)
 
 **目标**: 连接第二只 XHand，左右手同时遥操。
 
@@ -232,13 +270,14 @@ python main.py --config config.yaml --hand left
 
 **内容**:
 - 验证 RS485 双手寻址（同一串口两个 hand_id，或两个串口）
-- config.yaml 增加 right hand mapping（可能需要符号翻转）
-- main.py 循环中同时发送左右手指令
+- `config.yaml` 增加 right hand mapping（可能需要符号翻转）
+- `src/main.cpp` 控制循环中同时构造并发送左右手 `HandCommand_t`
+- `src/xhand_driver.{hpp,cpp}` 扩展为支持持有 1 或 2 个 hand_id 的引用，复用单个 `XHandControl` 实例
 
 **完成定义**: 双手同时独立跟随手套动作。
 
 ```bash
-python main.py --config config.yaml
+./udex_to_xhand --config config.yaml
 # 终端输出:
 # XHand Left:  hand_id=0, type=Left
 # XHand Right: hand_id=1, type=Right
@@ -260,17 +299,17 @@ python main.py --config config.yaml
 **目标**: PID 调参 + 映射微调 → 通过验收测试（拿起杯子）。
 
 **内容**:
-- 调整 kp/kd 平衡响应速度与稳定性（消除震荡或迟滞）
+- 在 `config.yaml` 调整 kp/kd 平衡响应速度与稳定性（消除震荡或迟滞） — C++ 二进制 hot-reload 不在范围，每轮调参重启 `./udex_to_xhand`
 - 微调 mapping 权重和 clamp 范围（尤其是拇指，3 DOF 映射最复杂）
-- 如有需要，加低通滤波平滑 UDP 抖动
-- 连续运行 30 分钟压测
+- 如有需要，在 `src/joint_mapper.cpp` 加低通滤波 (e.g. exponential smoothing) 平滑 UDP 抖动 — 系数走 `config.yaml`
+- 连续运行 30 分钟压测，监控终端日志中的 cycle latency / dropped frames / SDK errors
 
 **完成定义**: 通过验收测试。
 
 ```
 验收测试流程:
 1. XHand 装在 G1 手臂末端 (ADR-023, 不再手持)
-2. 启动系统, 双手进入遥操模式
+2. ./udex_to_xhand --config config.yaml 启动, 双手进入遥操模式
 3. 操作员戴手套, 控制双 XHand 抓取桌上杯子
 4. 杯子离开桌面并保持 3 秒
 5. 放下杯子
@@ -291,8 +330,11 @@ M0 (skeleton)
 ├── M3 (XHand driver)
 │
 └── M4 (single-hand teleop) ← M1 + M2 + M3
-    └── M5 (port to G1 PC2)   ADR-023
-        └── M6 (safety)
+    └── M5 (C++ rewrite + port to G1 PC2)   ADR-023
+        ├── M5a (vendor SDK build on PC2)
+        ├── M5b (project C++ port: main/receiver/mapper/driver/safety)
+        └── M5c (M3 + M4 re-validation on PC2)
+            └── M6 (safety hardening, C++)
             └── M7 (dual hand)
                 └── M8 (tuning + acceptance)
 ```
@@ -306,9 +348,9 @@ M0 (skeleton)
 | M2 Param Verify         | 0.5d | 1.5d |
 | M3 XHand Driver         | 0.5d | 2d   |
 | M4 Single-hand Teleop   | 1d   | 3d   |
-| M5 Port to G1 PC2       | 0.5d | 3.5d |
-| M6 Safety               | 0.5d | 4d   |
-| M7 Dual Hand            | 0.5d | 4.5d |
-| M8 Tuning + Acceptance  | 1d   | 5.5d |
+| M5 C++ Port to G1 PC2   | 2d   | 5d   |
+| M6 Safety (C++)         | 0.5d | 5.5d |
+| M7 Dual Hand            | 0.5d | 6d   |
+| M8 Tuning + Acceptance  | 1d   | 7d   |
 
-M1 和 M3 无依赖关系，可并行。最快路径: **4.5 天** (前提: aarch64 wheel 可用; 否则 M5 工期不确定)。
+M1 和 M3 无依赖关系，可并行。最快路径: **7 天** (M5 因厂商仅提供 C++ SDK，含 M5a 原生验证 / M5b 项目 C++ 化 / M5c PC2 验收 三个子阶段，工期从 0.5d 升到 2d)。
