@@ -1,11 +1,22 @@
-# Python
+# Python (legacy M0-M4 prototype + offline scripts under scripts/)
 __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
 dist/
-build/
 *.whl
+
+# C++ / CMake build artifacts (M5+ runtime target)
+*.o
+*.a
+*.obj
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
+# Build outputs (any language; matches ./build/, xhand_control_sdk/tests/build/, etc.)
+build/
 
 # Virtual environments
 venv/
@@ -29,9 +40,9 @@ logs/
 # Config with secrets (template tracked, actual ignored)
 config.local.yaml
 
+# Vendor / reference materials kept locally but not in repo
 URDF/
 udcap关节文档/
 xhand_control_ros2/
 xhand中文文档/
-SPEC.md
-CLAUDE.md
+xhand_control_sdk_py/
