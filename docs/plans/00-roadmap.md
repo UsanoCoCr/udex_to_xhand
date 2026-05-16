@@ -1,5 +1,11 @@
 # Roadmap: UDCAP → XHand Teleoperation
 
+## Revision History
+
+- 2026-05-16 — 第 1 次修订 — 部署主机切换到宇树 G1 PC2 (aarch64)；新增 M5 (Port to G1 PC2)，原 M5/M6/M7 顺延为 M6/M7/M8。详见 [ADR-023](../decisions/023-roadmap-pivot-g1-pc2-as-host.md).
+
+---
+
 原则：**M0 用 stub 打通完整 pipeline**，后续 milestone 逐个替换为真实模块。
 每个 milestone 独立可验证，不超过 1 天。
 
@@ -147,17 +153,48 @@ python main.py --config config.yaml --hand left
 
 ---
 
-## M5: Safety Layer
+## M5: Port to G1 PC2
+
+**目标**: 将 M0–M4 已验证的栈从外置 Linux 开发 PC 迁移到宇树 G1 板载 PC2 (aarch64 Linux)。迁移完成后 PC2 成为唯一部署目标，外置 PC 仅作开发 / 备用。
+
+**前置硬关卡**:
+- 获取或编译匹配 aarch64 的 `xhand_controller` wheel
+- 不可用则 M5 阻塞，需单独 ADR 决策（vendor 协助 / 源码编译 / 回退外置 PC）
+
+**内容**:
+- PC2 上确认 Python 3.10+，建 conda 环境，安装 aarch64 版 xhand_controller wheel
+- XHand 接 PC2 USB，验证 `/dev/ttyACM*` 枚举 + dialout 串口权限
+- 配置网络路径：Windows UDCAP → G1 网络 → PC2（静态 IP / 防火墙放行）
+- 在 PC2 上重跑 M3 验收（fist/palm/V/OK）
+- 在 PC2 上重跑 M4 验收（单手实时跟随，方向正确）
+
+**完成定义**: 在 PC2 上单手实时跟随通过，latency 与外置 PC 上 M4 基线相比 ±5ms 内。
+
+```bash
+# 在 G1 PC2 上 (aarch64 Linux), conda activate xhand
+python xhand_driver.py --port /dev/ttyACM0 --actions fist,palm,v,ok
+# 预期: 与 M3 验收输出一致
+
+python main.py --config config.yaml --hand left
+# 预期: 与 M4 验收一致, latency 在 dev PC 基线 ±5ms 内
+```
+
+**依赖**: M4（算法栈已验证）, G1 PC2 已刷 Linux, aarch64 SDK wheel 可用
+**ADRs**: 023 (pivot to G1 PC2)
+
+---
+
+## M6: Safety Layer
 
 **目标**: 加入所有安全机制，使系统可以无人值守运行。
 
 **内容**:
 - Watchdog: 200ms 无 UDP → hold 最后位置 + 日志告警
 - Joint clamp: 按 config.yaml 中 per-joint [min, max] 钳位
-- Graceful shutdown: Ctrl+C → mode=0 → close_device
+- Graceful shutdown: Ctrl+C 或 SIGTERM → mode=0 → close_device (ADR-023: PC2 lifecycle 可能被外部管理)
 - 启动检查: hand_id 验证 + CalibrationStatus == 3
 
-**完成定义**: 以下三个故障场景全部通过。
+**完成定义**: 以下故障场景全部通过。
 
 ```bash
 # 测试 1: Watchdog
@@ -166,10 +203,14 @@ python main.py --config config.yaml --hand left
 # 预期: 终端 200ms 后打印 "WATCHDOG: no UDP for 200ms, holding position"
 #        XHand 保持最后姿态不动
 
-# 测试 2: Graceful shutdown
+# 测试 2: Graceful shutdown (Ctrl+C)
 # → 按 Ctrl+C
 # 预期: 终端打印 "Shutdown: setting mode=0 (passive)"
 #        XHand 手指松弛（无力模式）
+
+# 测试 2b: Graceful shutdown (SIGTERM)
+# → kill -TERM <pid>
+# 预期: 行为同 Ctrl+C, 终端打印 "Shutdown: setting mode=0 (passive)"
 
 # 测试 3: Clamp
 # → 在 config.yaml 中设 index_joint1 clamp 为 [0, 30] (度)
@@ -177,13 +218,17 @@ python main.py --config config.yaml --hand left
 # 预期: XHand 食指停在 30° 位置不继续弯
 ```
 
-**依赖**: M4
+**依赖**: M5 (PC2 部署已通过)
 
 ---
 
-## M6: 双手集成
+## M7: 双手集成
 
 **目标**: 连接第二只 XHand，左右手同时遥操。
+
+**前置检查** (ADR-023):
+- PC2 暴露的 USB 数量是否够同时接两只 XHand
+- RS485 双手寻址方案: 同串口两个 hand_id, 还是两个串口?
 
 **内容**:
 - 验证 RS485 双手寻址（同一串口两个 hand_id，或两个串口）
@@ -206,11 +251,11 @@ python main.py --config config.yaml
 - [ ] 双手同时握拳 → 双 XHand 同时握拳
 - [ ] 左右手做不同动作 → 各自正确
 
-**依赖**: M5, 第二只 XHand 硬件
+**依赖**: M6, 第二只 XHand 硬件
 
 ---
 
-## M7: 调优 + 验收
+## M8: 调优 + 验收
 
 **目标**: PID 调参 + 映射微调 → 通过验收测试（拿起杯子）。
 
@@ -224,15 +269,16 @@ python main.py --config config.yaml
 
 ```
 验收测试流程:
-1. 启动系统, 双手进入遥操模式
-2. 操作员戴手套, 控制双 XHand 抓取桌上杯子
-3. 杯子离开桌面并保持 3 秒
-4. 放下杯子
+1. XHand 装在 G1 手臂末端 (ADR-023, 不再手持)
+2. 启动系统, 双手进入遥操模式
+3. 操作员戴手套, 控制双 XHand 抓取桌上杯子
+4. 杯子离开桌面并保持 3 秒
+5. 放下杯子
 
 判定: 连续尝试 5 次, 成功 ≥3 次 = PASS
 ```
 
-**依赖**: M6
+**依赖**: M7
 
 ---
 
@@ -245,22 +291,24 @@ M0 (skeleton)
 ├── M3 (XHand driver)
 │
 └── M4 (single-hand teleop) ← M1 + M2 + M3
-    └── M5 (safety)
-        └── M6 (dual hand)
-            └── M7 (tuning + acceptance)
+    └── M5 (port to G1 PC2)   ADR-023
+        └── M6 (safety)
+            └── M7 (dual hand)
+                └── M8 (tuning + acceptance)
 ```
 
 ## 时间估算
 
-| Milestone              | 估算 | 累计 |
-| ---------------------- | ---- | ---- |
-| M0 Skeleton            | 0.5d | 0.5d |
-| M1 UDP Receiver        | 0.5d | 1d   |
-| M2 Param Verify        | 0.5d | 1.5d |
-| M3 XHand Driver        | 0.5d | 2d   |
-| M4 Single-hand Teleop  | 1d   | 3d   |
-| M5 Safety              | 0.5d | 3.5d |
-| M6 Dual Hand           | 0.5d | 4d   |
-| M7 Tuning + Acceptance | 1d   | 5d   |
+| Milestone               | 估算 | 累计 |
+| ----------------------- | ---- | ---- |
+| M0 Skeleton             | 0.5d | 0.5d |
+| M1 UDP Receiver         | 0.5d | 1d   |
+| M2 Param Verify         | 0.5d | 1.5d |
+| M3 XHand Driver         | 0.5d | 2d   |
+| M4 Single-hand Teleop   | 1d   | 3d   |
+| M5 Port to G1 PC2       | 0.5d | 3.5d |
+| M6 Safety               | 0.5d | 4d   |
+| M7 Dual Hand            | 0.5d | 4.5d |
+| M8 Tuning + Acceptance  | 1d   | 5.5d |
 
-M1 和 M3 无依赖关系，可并行。最快路径: **4 天**。
+M1 和 M3 无依赖关系，可并行。最快路径: **4.5 天** (前提: aarch64 wheel 可用; 否则 M5 工期不确定)。
