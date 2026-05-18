@@ -175,9 +175,14 @@ int run_actions(const cli::Args& args, const XHandConfig& xc) {
         auto rad = preset_actions::deg_to_rad(p->deg);
         safety::clamp_in_place(rad);
 
+        // Honor --hand selection (plan §4 mutex matrix: --actions + --hand ✅,
+        // mirrors FULL-mode dispatch in the loop below). Default is both.
+        const bool want_left  = (args.hand != cli::HandSelect::Right);
+        const bool want_right = (args.hand != cli::HandSelect::Left);
+
         try {
-            if (driver.has_left())  driver.send_left(rad);
-            if (driver.has_right()) driver.send_right(rad);
+            if (want_left  && driver.has_left())  driver.send_left(rad);
+            if (want_right && driver.has_right()) driver.send_right(rad);
         } catch (const std::exception& e) {
             LOG_ERROR("send: " << e.what());
             break;

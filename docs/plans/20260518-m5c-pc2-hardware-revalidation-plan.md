@@ -429,8 +429,17 @@ cd build
 cmake -DBUILD_TESTS=ON .. 2>&1 | tee ../docs/logs/m5c-cmake-2026-05-18.log
 make -j 2>&1 | tee ../docs/logs/m5c-make-2026-05-18.log
 # 期望: 退出 0；`./udex_to_xhand` 与 `./test_mapper_snapshot` 都存在；无 -Wall -Wextra -Wpedantic 警告。
-./test_mapper_snapshot
-# 期望: M5b 的结论复现：L max |Δ|=0.0e+00 / R max |Δ|=1.4e-17，全 PASS。
+./test_mapper_snapshot \
+    --fixture ../tests/fixtures/mapper_baseline.json \
+    --example ../example.json \
+    --config  ../config.yaml
+# 期望（M5b 结论复现）:
+#   [INFO] fixture SHA-256 match: example.json + config.yaml unchanged
+#   [INFO] running JointMapper on example.json
+#   [INFO] L joints max |Δ| = 0.0e+00 rad  (tol 1.0e-06) → PASS
+#   [INFO] R joints max |Δ| = 1.4e-17 rad  (tol 1.0e-06) → PASS
+#   [INFO] all 24 joints within tolerance
+#   exit 0
 # 用途：证明 actions 改动没破坏 mapper 路径（同一个 src/joint_mapper.cpp 也参与新二进制构建）。
 ```
 
@@ -773,7 +782,10 @@ cd udex_to_xhand
 mkdir -p build && cd build
 cmake -DBUILD_TESTS=ON .. 2>&1 | tee ../docs/logs/m5c-cmake-2026-05-18.log
 make -j 2>&1                  | tee ../docs/logs/m5c-make-2026-05-18.log
-./test_mapper_snapshot
+./test_mapper_snapshot \
+    --fixture ../tests/fixtures/mapper_baseline.json \
+    --example ../example.json \
+    --config  ../config.yaml
 
 # Hardware: serial
 ls -l /dev/ttyACM*            | tee ../docs/logs/m5c-ttyacm-2026-05-18.log
