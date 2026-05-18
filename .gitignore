@@ -36,6 +36,9 @@ Thumbs.db
 # Project runtime
 logs/
 *.log
+# Exception: milestone evidence logs are tracked under docs/logs/
+!docs/logs/
+!docs/logs/*.log
 
 # Config with secrets (template tracked, actual ignored)
 config.local.yaml

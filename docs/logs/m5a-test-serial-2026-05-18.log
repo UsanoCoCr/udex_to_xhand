@@ -1,0 +1,93 @@
+# M5a vendor test_serial capture — 2026-05-18, LEFT XHand on G1 PC2
+# Source: xhand_control_sdk/tests/build/test_serial (vendor sample,
+#         only patch applied: src/serial_test.cpp:36 ttyUSB0 → ttyACM0)
+# Note: paste below is the slice the operator forwarded from PC2.
+#       It is partial — the final "Enter finger id:" prompt is where
+#       Ctrl+C was issued; the "Exiting program." line is not in this
+#       slice but the operator confirmed it printed on PC2.
+# Acceptance vs plan §3.5 evaluated below in plan §6 Execution Record.
+# ------------------------------------------------------------------
+xhand_control initialized 1.4.3
+/dev/ttyACM0
+/dev/ttyACM1
+/dev/ttyS0
+/dev/ttyS1
+/dev/ttyS2
+/dev/ttyS3
+try open device times: 1 / 3
+Start reading data from serial port
+RS485 opened successfully
+hand id: 1
+type: L
+serial number: 012L320220250728005
+save to flash okset name successfully,current name xhand
+Unknow Cmd!
+reset sensor successfully
+ plam version: 1.3.9
+***********************
+ firmware version: 3
+***********************
+ joint 0 version: 1.1.0
+ joint 1 version: 1.1.0
+ joint 2 version: 1.1.0
+ joint 3 version: 1.1.0
+ joint 4 version: 1.1.0
+ joint 5 version: 1.1.0
+ joint 6 version: 1.1.0
+ joint 7 version: 1.1.0
+ joint 8 version: 1.1.0
+ joint 9 version: 1.1.0
+ joint 10 version: 1.1.0
+ joint 11 version: 1.1.0
+ finger 17 version: 1.0.4
+ finger 18 version: 1.0.4
+ finger 19 version: 1.0.4
+ finger 20 version: 1.0.4
+ finger 21 version: 1.0.4
+finger 0 parameter: 12627,-10240,0,0,0,0
+finger 1 parameter: -18944,2560,0,0,0,0
+finger 2 parameter: 30965,0,0,0,0,0
+finger 3 parameter: 0,0,0,0,0,0
+finger 4 parameter: -31680,0,0,0,0,0
+finger 5 parameter: 343,0,0,0,0,0
+finger 6 parameter: 15370,25705,0,0,0,0
+finger 7 parameter: 30,-2460,0,0,0,0
+finger 8 parameter: 2570,28270,0,0,0,0
+finger 9 parameter: 2570,28270,0,0,0,0
+finger 10 parameter: 2570,28270,0,0,0,0
+finger 11 parameter: 2570,28270,0,0,0,0
+joint 0 action total counts: 317
+joint 0 action direction counts: 879
+joint 1 action total counts: 383
+joint 1 action direction counts: 1210
+joint 2 action total counts: 374
+joint 2 action direction counts: 845
+joint 3 action total counts: 941
+joint 3 action direction counts: 709
+joint 4 action total counts: 329
+joint 4 action direction counts: 962
+joint 5 action total counts: 299
+joint 5 action direction counts: 776
+joint 6 action total counts: 330
+joint 6 action direction counts: 867
+joint 7 action total counts: 230
+joint 7 action direction counts: 576
+joint 8 action total counts: 316
+joint 8 action direction counts: 864
+joint 9 action total counts: 293
+joint 9 action direction counts: 738
+joint 10 action total counts: 346
+joint 10 action direction counts: 857
+joint 11 action total counts: 268
+joint 11 action direction counts: 686
+select follow num to choose fingure mode:
+        0       ---     Passive Mode
+        3       ---     Position Control Mode
+        5       ---     Force Control Mode
+Selected mode: Position Control Mode
+Enter finger id: Enter position: command sent failed 1501070  Communication data CRC error
+Finger 4 position: -0.0174528 control mode: 3 raw position: 3221 torq: -11 commboard_err:0 jointboard_err:0 tipboard_err:307
+Enter finger id: Enter position: command sent successfully
+Finger 4 position: 0.0843551 control mode: 3 raw position: 3152 torq: -170 commboard_err:0 jointboard_err:0 tipboard_err:0
+Enter finger id:
+# --- paste ends here (Ctrl+C issued at this prompt; "Exiting program." printed on PC2 but not captured) ---

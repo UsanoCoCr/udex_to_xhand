@@ -4,6 +4,7 @@
 
 - 2026-05-16 — 第 1 次修订 — 部署主机切换到宇树 G1 PC2 (aarch64)；新增 M5 (Port to G1 PC2)，原 M5/M6/M7 顺延为 M6/M7/M8。详见 [ADR-023](../decisions/023-roadmap-pivot-g1-pc2-as-host.md).
 - 2026-05-16 — 第 2 次修订 — 发现厂商提供的是 `xhand_control_sdk/` (aarch64 **C++** SDK + headers + .so)，**没有 Python wheel**。M5 阻塞解除；决定弃用 Python 算法栈，**在 PC2 上把 M1/M3/M4 的 Python 模块整体重写为单一 C++ 二进制**，避免 Python↔C++ FFI 跨语言开销，并匹配仓库内 `xhand_control_ros2.hpp` 的语言基线。`config.yaml`/ADRs/example.json 等已验证资产保留。M5 拆为 M5a/M5b/M5c，工期估算 0.5d → 2d。CLAUDE.md / SPEC.md 中的 Python 基线需在 M5 完成后同步更新。
+- 2026-05-18 — 第 3 次修订 — M5a 在 G1 PC2 上执行通过（左手，joint 4 ±0.1 rad，SDK 1.4.3，hand_id=1，serial 012L320220250728005）。新增 ADR-024 / 025 / 026 / 027 记录 M5a 非显然决定（vendor 示例作 bring-up harness / 厂商源不入库 / 沿用厂商 PID kp=225 / joint 4 作 smoke joint）。Execution Record 见 [plan §6](./20260516-m5a-vendor-sdk-pc2-bringup-plan.md#6-execution-record--filled-2026-05-18)，日志归档 `docs/logs/m5a-test-serial-2026-05-18.log`。
 
 ---
 
@@ -176,11 +177,12 @@ python main.py --config config.yaml --hand left
 
 **内容**:
 
-### M5a · C++ SDK 在 PC2 上原生验证 (0.5d)
+### M5a · C++ SDK 在 PC2 上原生验证 (0.5d) ✅
 - PC2 安装依赖: `cmake g++ libcurl4-openssl-dev libssl-dev nlohmann-json3-dev libyaml-cpp-dev`
 - 编译厂商示例: `cd xhand_control_sdk/tests && mkdir build && cd build && cmake .. && make`
 - 配置 `/dev/ttyACM*` 串口权限 (dialout 组), 运行 `./test_serial` (注意厂商示例默认 `/dev/ttyUSB0`，按 ADR-014 改为 `/dev/ttyACM0`)
 - 验收: 能枚举 hand_id、显示 type/SN、单关节 send_command 成功 → 证明硬件 + .so 在 PC2 上闭环可用
+- **结果 (2026-05-18)**: SDK 1.4.3 / hand_id=1 / type=L / SN=012L320220250728005 / joint 4 commanded 0.1 rad → read-back 0.0843551 rad (> 0.05 阈值)。详见 [bring-up plan](./20260516-m5a-vendor-sdk-pc2-bringup-plan.md) + ADRs 024/025/026/027。
 
 ### M5b · 项目 C++ 化 (1d)
 - 新建 `src/` + 顶层 `CMakeLists.txt` (`find_package(xhand_control HINTS xhand_control_sdk/share)`)，产出 `udex_to_xhand` 可执行文件
@@ -217,7 +219,7 @@ ls ./udex_to_xhand   # 预期: ELF aarch64 可执行文件
 ```
 
 **依赖**: M4 (Python 版算法已验证，`config.yaml` 数据已校准), G1 PC2 已刷 Linux, `xhand_control_sdk/` 已就绪 ✅
-**ADRs**: 023 (pivot to G1 PC2); **待新增** ADR (M5 实施时记录: 选择纯 C++ 重写而非 pybind11/ctypes binding 的理由 — FFI 成本、reference 语言一致性、deployment 简化)
+**ADRs**: 023 (pivot to G1 PC2); 024 (vendor sample as M5a harness); 025 (vendor source pristine, sed not committed); 026 (M5a uses vendor PID defaults, not CLAUDE.md); 027 (joint 4 ±0.1 rad as smoke joint); **待新增** ADR (M5b 实施时记录: 选择纯 C++ 重写而非 pybind11/ctypes binding 的理由 — FFI 成本、reference 语言一致性、deployment 简化)
 **Post-M5 文档同步**: 完成后需更新 CLAUDE.md (Python 3.10+ 基线 → C++17 + cmake)、SPEC.md、README 中关于运行命令与依赖的部分
 
 ---
