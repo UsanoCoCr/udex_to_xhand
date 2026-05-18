@@ -1,0 +1,15 @@
+[INFO] config loaded: ../config.yaml
+[INFO] mode: FULL (UDP + XHand)
+[INFO] UDP bound 0.0.0.0:9000
+try open device times: 1 / 3 
+Start reading data from serial port
+[INFO] XHand SDK version: 1.4.3
+[INFO] Serial: /dev/ttyACM0 @ 3000000 baud
+[INFO] hand_id=1 type=Left
+[INFO] waiting for first packet...
+[INFO] first packet from 192.168.3.24
+[INFO] Shutdown: mode=0 (passive)
+serial close
+[INFO] Device closed
+[INFO] latency_ms{n=1773 min=9.52464 avg=9.59516 p50=9.5711 p95=9.61949 max=10.675}
+[INFO] exited after 31.0s, 3000 ticks, 1773 valid frames, 0 parse errors

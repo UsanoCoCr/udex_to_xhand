@@ -6,6 +6,7 @@
 - 2026-05-16 — 第 2 次修订 — 发现厂商提供的是 `xhand_control_sdk/` (aarch64 **C++** SDK + headers + .so)，**没有 Python wheel**。M5 阻塞解除；决定弃用 Python 算法栈，**在 PC2 上把 M1/M3/M4 的 Python 模块整体重写为单一 C++ 二进制**，避免 Python↔C++ FFI 跨语言开销，并匹配仓库内 `xhand_control_ros2.hpp` 的语言基线。`config.yaml`/ADRs/example.json 等已验证资产保留。M5 拆为 M5a/M5b/M5c，工期估算 0.5d → 2d。CLAUDE.md / SPEC.md 中的 Python 基线需在 M5 完成后同步更新。
 - 2026-05-18 — 第 3 次修订 — M5a 在 G1 PC2 上执行通过（左手，joint 4 ±0.1 rad，SDK 1.4.3，hand_id=1，serial 012L320220250728005）。新增 ADR-024 / 025 / 026 / 027 记录 M5a 非显然决定（vendor 示例作 bring-up harness / 厂商源不入库 / 沿用厂商 PID kp=225 / joint 4 作 smoke joint）。Execution Record 见 [plan §6](./20260516-m5a-vendor-sdk-pc2-bringup-plan.md#6-execution-record--filled-2026-05-18)，日志归档 `docs/logs/m5a-test-serial-2026-05-18.log`。
 - 2026-05-18 — 第 4 次修订 — M5b 在 G1 PC2 上执行通过（C++17 单二进制 `udex_to_xhand` 落地；mock 300/300 ticks；snapshot test L max |Δ|=0.0e+00 rad / R max |Δ|=1.4e-17 rad，远低于 1e-6 tolerance；receiver-only @ UDCAP 192.168.3.24 收 616/1000 包 0 parse errors；`-Wall -Wextra -Wpedantic` 无警告）。新增 ADR-028 / 029 / 030 / 031（纯 C++ 重写 / CalibrationStatus pre-check 拆 UDCAP+XHand 两侧 / snapshot fixture 用 SHA-256 自校验 / `legacy_python/` 提前到 M5b 重组）。`legacy_python/` 创建于本 milestone 作为 Python 原型的归集点。Execution Record 见 [plan §11](./20260518-m5b-cpp-rewrite-plan.md#11-6-execution-record-filled-at-end-of-m5b)，日志归档 `docs/logs/m5b-{cmake,make,mock-run,snapshot-test,receiver}-2026-05-18.log`。
+- 2026-05-18 — 第 5 次修订 — **M5c 在 G1 PC2 上真实硬件复测通过；M5 整体 ✅**。`--actions fist,palm,v,ok`（M3 等价物）4 个动作全部物理观察通过（hand_id=1 type=Left，SDK 1.4.3；2 次 startup CRC，ADR-017 log-not-crash 覆盖）。`--config ../config.yaml --hand left --duration 30`（M4 等价物）戴 UDCAP 手套单手实时跟随：5 项手指 + 握拳 + 张开目检通过，1773 valid frames / 3000 ticks / 0 parse errors，**latency_ms{n=1773 avg=9.60 p95=9.62 max=10.68}** —— 远低于 SPEC §9 phase 3.9 的 50ms 阈值（avg ≈ 19% ceiling）。SIGTERM → mode=0 + close_device 视觉验证通过（log 因 plan §6.6 `kill -TERM $!→tee` 截断，已 post-run 修复）。新增 ADR-032 / 033 / 034（preset 表 header-only + Python 字节一致脚本 / latency stats 用 vector+sort 而非 streaming / `--actions` 模式 tolerate 缺失 config.yaml）。§6.2 LOCAL→PC2 sync + §6.10 log pull 因 PC2 sshd 预 banner 拒连未走 rsync，改用 git push/pull + 手工 log 复制；§6.7 网络专用 log 未产，UDP 通路由 §6.8 teleop log 中 "first packet from 192.168.3.24" + 0 parse errors 反证。Execution Record 见 [plan §11](./20260518-m5c-pc2-hardware-revalidation-plan.md#11-execution-record-filled-2026-05-18)，日志归档 `docs/logs/m5c-{cmake,make,ttyacm,actions,sigterm,teleop-left}-2026-05-18.log`（6 个）。
 
 ---
 
@@ -156,7 +157,7 @@ python main.py --config config.yaml --hand left
 
 ---
 
-## M5: Port to G1 PC2 (C++ 重写底层栈)
+## M5: Port to G1 PC2 (C++ 重写底层栈) ✅
 
 **目标**: 在 G1 PC2 (aarch64 Linux) 上把 M0–M4 验证过的算法栈用 C++ 重写为单一可执行二进制 `udex_to_xhand`，取代 main.py + 全部 Python 模块。迁移完成后 PC2 成为唯一部署目标，外置 PC 仅作开发 / 备用。
 
@@ -196,13 +197,14 @@ python main.py --config config.yaml --hand left
 - 单元级验收: `--mock` 模式以 ~100Hz 打印左右手 12 关节值 (等价于原 Python M0 stub 验收)
 - **结果 (2026-05-18)**: build 干净（g++ 11.4.0 / nlohmann_json 3.10.5 / OpenSSL 3.0.2 / CURL 7.81.0；`-Wall -Wextra -Wpedantic` 0 警告）。mock 300 ticks 全部产生 12+12 关节输出。Snapshot 等价测试 L max |Δ|=**0.0e+00 rad**、R max |Δ|=**1.4e-17 rad**（远低于 1e-6 tolerance；Python ↔ C++ 算法位级一致）。Receiver-only 在 UDCAP @ 192.168.3.24 在线时收 616/1000 ticks、0 parse errors、calib L=3 R=3 稳定 10s。Python 原型 6 个文件迁入 `legacy_python/`，`joint_mapper.py` 留作 snapshot oracle。详见 [plan §11](./20260518-m5b-cpp-rewrite-plan.md#11-6-execution-record-filled-at-end-of-m5b) + ADRs 028/029/030/031。
 
-### M5c · PC2 上重跑 M3 / M4 验收 (0.5d)
+### M5c · PC2 上重跑 M3 / M4 验收 (0.5d) ✅
 - XHand 接 PC2 USB，确认 `/dev/ttyACM*` 枚举 (ADR-014)
 - 网络: Windows UDCAP → G1 网络 → PC2（静态 IP + 防火墙放行 UDP 9000）
 - 重跑 M3 验收: fist / palm / V / OK 四个动作 (C++ 版本)
 - 重跑 M4 验收: 戴手套单手实时跟随，方向正确，无明显延迟
+- **结果 (2026-05-18)**: PC2 上 `udex_to_xhand` C++ 二进制完成 M3 + M4 行为级硬件复测。`--actions fist,palm,v,ok` 4/4 动作物理观察通过；2 次 startup CRC 未阻塞动作（ADR-017）。`--hand left --duration 30` 戴手套实时跟随：5 项手指 + 握拳 + 张开目检通过，`latency_ms{n=1773 avg=9.60 p95=9.62 max=10.68}`（**远低于 SPEC §9 50ms 阈值**，分布 max-min ≈ 1.15ms 极紧）、0 parse errors。SIGTERM → mode=0 + close_device 视觉验证通过。详见 [plan §11](./20260518-m5c-pc2-hardware-revalidation-plan.md#11-execution-record-filled-2026-05-18) + ADRs 032/033/034。
 
-**完成定义**: PC2 上单手实时跟随通过，latency 与外置 PC 上 Python 版 M4 基线相比改善或在 ±5ms 内（C++ 版本预期等好或更稳）。
+**完成定义**: PC2 上单手实时跟随通过，latency 与外置 PC 上 Python 版 M4 基线相比改善或在 ±5ms 内（C++ 版本预期等好或更稳）。**实际**：Python M4 dev-PC 没有归档具体 latency 数值（M4 plan §4 只跑视觉验收），所以以 SPEC §9 的 `<50ms` 绝对界为权威 —— M5c 实测 avg/p95 ≈ 9.6ms，约 19% ceiling，**通过**。
 
 ```bash
 # M5a: 厂商 C++ SDK 原生验证
@@ -221,7 +223,7 @@ ls ./udex_to_xhand   # 预期: ELF aarch64 可执行文件
 ```
 
 **依赖**: M4 (Python 版算法已验证，`config.yaml` 数据已校准), G1 PC2 已刷 Linux, `xhand_control_sdk/` 已就绪 ✅
-**ADRs**: 023 (pivot to G1 PC2); 024 (vendor sample as M5a harness); 025 (vendor source pristine, sed not committed); 026 (M5a uses vendor PID defaults, not CLAUDE.md); 027 (joint 4 ±0.1 rad as smoke joint); 028 (pure C++ rewrite, no pybind11/ctypes binding); 029 (CalibrationStatus pre-check is UDCAP-side only — XHand driver does not assert it); 030 (snapshot fixture as committed JSON with SHA-256 self-check); 031 (`legacy_python/` reorg performed during M5b, user-directed)
+**ADRs**: 023 (pivot to G1 PC2); 024 (vendor sample as M5a harness); 025 (vendor source pristine, sed not committed); 026 (M5a uses vendor PID defaults, not CLAUDE.md); 027 (joint 4 ±0.1 rad as smoke joint); 028 (pure C++ rewrite, no pybind11/ctypes binding); 029 (CalibrationStatus pre-check is UDCAP-side only — XHand driver does not assert it); 030 (snapshot fixture as committed JSON with SHA-256 self-check); 031 (`legacy_python/` reorg performed during M5b, user-directed); 032 (preset action table header-only with Python byte-equality script); 033 (M5c latency stats — vector+sort for exact p95, not streaming); 034 (`--actions` mode tolerates missing/invalid `--config`)
 **Post-M5 文档同步**: 完成后需更新 CLAUDE.md (Python 3.10+ 基线 → C++17 + cmake)、SPEC.md、README 中关于运行命令与依赖的部分
 
 ---

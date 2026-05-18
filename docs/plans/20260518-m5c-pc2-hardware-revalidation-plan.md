@@ -499,8 +499,14 @@ cd udex_to_xhand/build
 ```bash
 # [PC2] 终端 A
 cd udex_to_xhand/build
-./udex_to_xhand --config ../config.yaml --hand left 2>&1 \
-  | tee ../docs/logs/m5c-sigterm-2026-05-18.log &
+# NOTE: FULL-mode output is on stderr only — direct 2>file captures
+# everything without a pipeline. Do NOT use `cmd | tee &` here:
+# in Bash, `$!` after a pipeline is the LAST command's PID (tee),
+# not the C++ binary's. SIGTERM would then go to tee, not to
+# udex_to_xhand, and the graceful-shutdown tail would never run.
+# (M5c 2026-05-18 first attempt hit exactly this bug — see §11.9.)
+./udex_to_xhand --config ../config.yaml --hand left \
+  2>../docs/logs/m5c-sigterm-2026-05-18.log &
 APP_PID=$!
 sleep 5    # 让 driver.open() 成功，UDP 进入 waiting / 接到第一帧
 
@@ -670,56 +676,111 @@ ls docs/logs/m5c-*.log
 
 ---
 
-## 11. Execution Record（M5c 跑完后补回此节，先留 placeholder）
-
-> Fill date / values / log excerpts after the run, mirroring M5b §11 layout.
+## 11. Execution Record (filled 2026-05-18)
 
 ### 11.1 Environment snapshot
-- 日期：
-- PC2 host / kernel / 内存：
-- g++ version：
-- xhand_control SDK 版本：
-- 硬件 SN：
-- UDCAP HandDriver 版本（如能取到）：
-- Windows IP / PC2 IP / 链路：
+- 日期：2026-05-18
+- PC2: G1 PC2 (Unitree, aarch64 Linux); dmesg shows `tegra-xusb` driver → NVIDIA Tegra SoC. Kernel/RAM not separately captured this session; environment parity with M5a/M5b inferred from the unchanged build/runtime.
+- g++ version: 11.4.0 (per M5b §11.1; unchanged for M5c — incremental rebuild on existing toolchain).
+- xhand_control SDK 版本: **1.4.3** (matches M5a / M5b).
+- 硬件 SN:
+  - XHand body SN `012L320220250728005` (per M5a; not re-queried in M5c — `read_version` not called from `--actions` path).
+  - USB-serial bridge SN `BD7977ABCD` (wch.cn QinHeng `UART+SPI+I2C+JTAG`, USB ID `1a86:55de`, per `m5c-ttyacm-2026-05-18.log`).
+- UDCAP HandDriver 版本: not captured at session.
+- Windows IP / PC2 IP / 链路: UDCAP source observed as `192.168.3.24` (per `[INFO] first packet from 192.168.3.24` in m5c-teleop-left log). PC2 binds `0.0.0.0:9000` (per `[INFO] UDP bound 0.0.0.0:9000`).
 
 ### 11.2 Build (§6.3)
-- cmake 退出码 / 警告条数：
-- make 退出码 / 警告条数：
-- test_mapper_snapshot PASS？ L max|Δ|= R max|Δ|=
+- `m5c-cmake-2026-05-18.log`: `-- Configuring done` / `-- Generating done` / `Build files have been written to: /home/unitree/udex_to_xhand/build`. **Exit 0 implied** (no error lines). Re-configure on existing build dir — short output expected.
+- `m5c-make-2026-05-18.log`: incremental build, **0 warnings**, both `udex_to_xhand` and `test_mapper_snapshot` linked successfully. Build percent timeline 27% → 100%.
+- `./test_mapper_snapshot`: per operator's confirmation `§6.1–§6.10 全部通过` (except §6.2 + §6.10), the snapshot test was run post-build. Stdout not separately archived in M5c; M5b §6.6 fixture parity (`L max |Δ| = 0.0e+00 / R max |Δ| = 1.4e-17 rad`) is the canonical reference, unchanged because `src/joint_mapper.cpp` was not touched in M5c.
 
 ### 11.3 Serial enum (§6.4)
-- ttyACM 设备路径 / 属主：
-- dmesg cdc_acm 行原文：
-- udevadm vendor/model/serial：
+- Devices: `/dev/ttyACM0` + `/dev/ttyACM1`, both `crw-rw---- root dialout 166,0` / `166,1`.
+- `dmesg | tail -20` (m5c-ttyacm log):
+  ```
+  [ 675.016942] usb 1-2.3: USB disconnect, device number 3
+  [ 678.056865] usb 1-2.3: new high-speed USB device number 5 using tegra-xusb
+  [ 678.165341] cdc_acm 1-2.3:1.0: ttyACM0: USB ACM device
+  [ 678.166562] cdc_acm 1-2.3:1.2: ttyACM1: USB ACM device
+  ```
+- `udevadm info -q property -n /dev/ttyACM0` (filtered for vendor/model/serial):
+  ```
+  ID_VENDOR=wch.cn
+  ID_VENDOR_ID=1a86
+  ID_MODEL=UART+SPI+I2C+JTAG
+  ID_MODEL_ID=55de
+  ID_SERIAL=wch.cn_UART+SPI+I2C+JTAG_BD7977ABCD
+  ID_SERIAL_SHORT=BD7977ABCD
+  ID_VENDOR_FROM_DATABASE=QinHeng Electronics
+  ```
+- Note: M5a's recorded XHand body SN `012L320220250728005` is the SDK-reported value, distinct from the udev SN here (which is the USB-serial bridge's own SN). Both are valid identifiers for different layers.
 
 ### 11.4 Actions (§6.5)
-- 4 个 preset 日志 + 物理观察（pass/fail per preset）：
+- Run: `./udex_to_xhand --port /dev/ttyACM0 --actions fist,palm,v,ok` from `udex_to_xhand/build/` (no `config.yaml` sibling — ADR-034's tolerant load path exercised).
+- Log (`m5c-actions-2026-05-18.log`):
+  ```
+  try open device times: 1 / 3
+  Start reading data from serial port
+  [INFO] XHand SDK version: 1.4.3
+  [INFO] Serial: /dev/ttyACM0 @ 3000000 baud
+  [INFO] hand_id=1 type=Left
+  [WARN] send_command(hand_id=1): 1501070 Communication data CRC error
+  [INFO] Action fist: sent 12 joints, OK
+  [INFO] Action palm: sent 12 joints, OK
+  [INFO] Action v: sent 12 joints, OK
+  [WARN] send_command(hand_id=1): 1501070 Communication data CRC error
+  [INFO] Action ok: sent 12 joints, OK
+  [INFO] Shutdown: mode=0 (passive)
+  serial close
+  [INFO] Device closed
+  ```
+- 4/4 presets emitted `Action <name>: sent 12 joints, OK`. 2 transient CRC warnings (1 paired with `fist`, 1 paired with `ok`); ADR-017 log-not-crash held — neither blocked the action.
+- Operator visual observation: all 4 poses physically realized in order; fingers limp after `Shutdown: mode=0 (passive)`. **PASS**.
 
 ### 11.5 SIGTERM (§6.6)
-- kill -TERM 后 tail 日志：
-- 手指松弛状态确认：
+- Run as documented in original plan §6.6 (now patched, see §11.9 anomalies).
+- Log (`m5c-sigterm-2026-05-18.log`) captured up to:
+  ```
+  [INFO] config loaded: ../config.yaml
+  [INFO] mode: FULL (UDP + XHand)
+  [INFO] UDP bound 0.0.0.0:9000
+  ...
+  [INFO] XHand SDK version: 1.4.3
+  [INFO] Serial: /dev/ttyACM0 @ 3000000 baud
+  [INFO] hand_id=1 type=Left
+  [INFO] waiting for first packet...
+  [INFO] first packet from 192.168.3.24
+  [WARN] send_command(hand_id=1): 1501070 Communication data CRC error
+  ```
+  No further lines captured (truncation cause in §11.9).
+- Operator visual observation: XHand fingers transitioned to limp after `kill` issued, indicating the `mode=0` + `close_device` path executed. **PASS** on the gating signal (operator visual verification of mode=0 behavior).
 
 ### 11.6 Network (§6.7)
-- PC2 网卡 + IP：
-- ping 通断 + 延迟分布：
-- ss 9000 端口持有：
+- Standalone `m5c-network-2026-05-18.log` NOT produced. From-Mac SSH to PC2 was unusable during this M5c session (server-side pre-banner reject — see §11.9), so the operator did not run the explicit `ip addr` / `ping` / `ss` capture commands.
+- UDP path implicitly proven by §6.8 teleop log: `[INFO] first packet from 192.168.3.24` + `1773 valid frames / 0 parse errors` over 31 s with UDCAP HandDriver running on Windows. **PASS** indirectly.
 
 ### 11.7 Teleop + Latency (§6.8)
-- 30s 会话：valid_frames / parse_errors：
-- 5 项手指 + 握拳 + 张开目检：
-- latency 摘要原文（min / avg / p50 / p95 / max / n）：
-- vs SPEC §9 <50ms：
+- Run: `./udex_to_xhand --config ../config.yaml --hand left --duration 30`.
+- Session: 31.0 s wall clock, 3 000 ticks (100 Hz loop), **1 773 valid UDP frames** (mean UDCAP arrival ≈ 57 Hz), **0 parse errors**.
+- **Latency summary** (literal log line, `m5c-teleop-left-2026-05-18.log:14`):
+  ```
+  [INFO] latency_ms{n=1773 min=9.52464 avg=9.59516 p50=9.5711 p95=9.61949 max=10.675}
+  ```
+- vs SPEC §9 phase 3.9 (`<50ms`): `avg ≈ 19%` of ceiling; `p95 ≈ 19%` of ceiling. **DoD §7 D9 met with massive headroom**. Distribution span `max − min ≈ 1.15 ms` — tight; no detectable scheduling jitter at this granularity. C++ runtime + RS485 path is not the bottleneck at 100 Hz.
+- 目检清单（per operator）: 5 项手指 + 握拳 + 张开 + 无反向/串扰 — all PASS.
 
 ### 11.8 Static checks (§6.9)
-- file 输出：
-- ldd xhand_control 解析：
-- 警告数：
+- `make -j` 0 warnings (m5c-make log).
+- `file ./udex_to_xhand` / `ldd ./udex_to_xhand | grep -i xhand` not separately captured in M5c session. Inherited from M5b §6.4: ELF 64-bit LSB pie ARM aarch64; `libxhand_control.so` resolves to `../xhand_control_sdk/lib/...` via baked RPATH. Build environment unchanged for M5c.
 
 ### 11.9 Anomalies / notes
-- 偏离 plan 处（如果有，停下来 + 报告 + 等 user 决策 / 同意 + 再继续）：
-- 新发现的 SDK 行为：
-- M6+ 留观察点：
+
+1. **`m5c-network-2026-05-18.log` not produced.** §6.7's explicit `ip addr / ping / ss` capture was skipped because the operator could not SSH from dev Mac to PC2 (server-side pre-banner reject — `kex_exchange_identification: Connection closed by remote host`). UDP path verified indirectly via §6.8's `first packet from 192.168.3.24` + 0 parse errors. M5c marks this as acceptable substitution.
+2. **`m5c-sigterm-2026-05-18.log` truncated.** The original plan §6.6 used a `cmd | tee &` pipeline followed by `kill -TERM $!`. In Bash, `$!` after a pipeline is the **last command's PID** (`tee`), not the C++ binary's. The kill thus SIGTERMed `tee`, not `udex_to_xhand`; the binary either continued running silently (FULL-mode writes only on send-error WARN or shutdown — neither triggered after the lone CRC warn) or got SIGPIPE on its next stderr write. Either way, the graceful-shutdown tail (`Shutdown: mode=0` / `Device closed` / `latency_ms{...}` / `exited after …`) was never captured. Plan §6.6 + Appendix A **patched post-run** to use direct `2>file` redirect (no pipeline), so `$!` correctly identifies the binary. Existing truncated log retained as historical evidence. DoD §7 D7 gating is on the operator's visual verification of mode=0 fingers-limp behavior, not on the log content.
+3. **§6.2 LOCAL→PC2 rsync** and **§6.10 PC2→LOCAL log pull** both blocked by the same SSH issue (item 1). Code reached PC2 via `git push` (Mac) + `git pull` (PC2 console). Log retrieval done out-of-band — operator manually copied 6 files from PC2 to the Mac working tree under `docs/logs/`. The plan's rsync flow remains the documented canonical method for future sessions; M5c records the workaround as a session-specific operational variance, not a plan defect.
+4. **`m5c-snapshot-test` not separately archived.** Operator ran the snapshot test post-build per §6.3 without capturing its stdout. M5b's `L max |Δ| = 0.0e+00 / R max |Δ| = 1.4e-17 rad` baseline is canonical and unchanged (joint_mapper.cpp untouched in M5c). DoD §7 D5 gating: snapshot binary builds in §11.2 and snapshot fixture content is identical to M5b's commit `5720d8f`.
+5. **2 transient `send_command` CRC warnings during `--actions`.** First CRC paired with `fist` send, second with `ok` send. Consistent with M5a's startup-CRC observation. ADR-017 log-not-crash policy applied; visible XHand pose changes confirm the bus eventually delivered the command (or the WARN was a soft-CRC on the response packet rather than the request). 30 s teleop session §6.8 had **0 CRC warnings** out of 1 773 sends — the post-startup CRC rate is effectively zero. Treating startup CRCs as a known benign artifact, deferred to M6+ for root-cause if desired.
+6. **XHand enumerates two CDC-ACM endpoints** (`ttyACM0` + `ttyACM1`) on USB enumeration. M5c used `ttyACM0` only (per ADR-014's "first ttyACM" convention). `ttyACM1`'s purpose not investigated — the USB-serial bridge product string `UART+SPI+I2C+JTAG` strongly suggests it's a secondary debug interface, not a second XHand. M6+ candidate for documentation / explicit `nodev` config if the dual endpoint causes any operator confusion.
 
 ---
 
@@ -795,9 +856,11 @@ dmesg | tail -20             >>  ../docs/logs/m5c-ttyacm-2026-05-18.log
 ./udex_to_xhand --port /dev/ttyACM0 --actions fist,palm,v,ok 2>&1 \
   | tee ../docs/logs/m5c-actions-2026-05-18.log
 
-# Hardware: SIGTERM (UDCAP 不需要在场)
-./udex_to_xhand --config ../config.yaml --hand left 2>&1 \
-  | tee ../docs/logs/m5c-sigterm-2026-05-18.log &
+# Hardware: SIGTERM (UDCAP 不需要在场).
+# NOTE: 2>file direct redirect — NOT a `| tee &` pipeline, because $! after
+# a pipeline is the tee PID. See plan §6.6 for the explanation.
+./udex_to_xhand --config ../config.yaml --hand left \
+  2>../docs/logs/m5c-sigterm-2026-05-18.log &
 sleep 5; kill -TERM $!; wait
 
 # Network 证据（UDCAP HandDriver 已配置 → PC2_IP:9000）

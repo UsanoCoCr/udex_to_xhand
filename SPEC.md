@@ -306,6 +306,7 @@ udex_to_xhand/
    - **Graceful shutdown**: Ctrl+C and `kill -TERM <pid>` both trigger mode=0 + close_device.
    - **Joint clamp**: Set a tight clamp in config.yaml (e.g. index_joint1 [0°, 30°]); verify XHand respects the limit when glove flexes past it.
 9. **Latency measurement**: Log end-to-end latency (UDCAP timestamp → XHand command sent). Target: <50ms.
+   - **M5c 实测 (2026-05-18)**: `avg = 9.60 ms`, `p95 = 9.62 ms`, `max = 10.68 ms` over `n = 1773` valid frames in a 31 s `--hand left` session — ≈ 19 % of the 50 ms ceiling. **NB**: UDCAP JSON exposes no sender timestamp (see §3.1), so the measurement is PC2-internal `frame.recv_ts → just after send_command return`, not glove-to-XHand wall clock. See `src/main.cpp::LatencyStats` + ADR-033 for algorithm; `docs/logs/m5c-teleop-left-2026-05-18.log` for raw record.
 10. **Stress test**: 30-minute continuous operation, monitor for drift, packet loss, or SDK errors.
 11. **Grasping test**: Attempt to pick up objects of varying sizes (pen, cup, ball).
 

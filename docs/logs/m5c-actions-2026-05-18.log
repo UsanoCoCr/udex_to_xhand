@@ -1,0 +1,14 @@
+try open device times: 1 / 3 
+Start reading data from serial port
+[INFO] XHand SDK version: 1.4.3
+[INFO] Serial: /dev/ttyACM0 @ 3000000 baud
+[INFO] hand_id=1 type=Left
+[WARN] send_command(hand_id=1): 1501070 Communication data CRC error
+[INFO] Action fist: sent 12 joints, OK
+[INFO] Action palm: sent 12 joints, OK
+[INFO] Action v: sent 12 joints, OK
+[WARN] send_command(hand_id=1): 1501070 Communication data CRC error
+[INFO] Action ok: sent 12 joints, OK
+[INFO] Shutdown: mode=0 (passive)
+serial close
+[INFO] Device closed
