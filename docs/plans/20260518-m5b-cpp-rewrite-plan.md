@@ -644,55 +644,64 @@ ADRs 029/030/031 are "write only if the design survives review challenges". M5a'
 
 ---
 
-## 11. 6 Execution Record (filled at end of M5b)
+## 11. 6 Execution Record (filled 2026-05-18)
 
-> Populate after the §6 commands run. Mirrors M5a plan §6 structure.
+> Populated from `docs/logs/m5b-{cmake,make,mock-run,snapshot-test,receiver}-2026-05-18.log` (PC2-side).
 
 ### 11.1 Environment snapshot
 
-- PC2 hostname: ___
-- `lsb_release -a` → ___
-- `cmake --version` → ___
-- `g++ --version` → ___
-- `dpkg -s nlohmann-json3-dev | grep Version` → ___
-- `dpkg -s libyaml-cpp-dev | grep Version` → ___
-- vendor SDK version (per M5a): 1.4.3
+| Item                              | Value                                                              |
+| --------------------------------- | ------------------------------------------------------------------ |
+| PC2 hostname (inferred from path) | `unitree` (build dir: `/home/unitree/udex_to_xhand/build`)         |
+| Compiler                          | GNU 11.4.0 (`/usr/bin/c++`) — from cmake log line 1                |
+| CURL                              | 7.81.0 (`/usr/lib/aarch64-linux-gnu/libcurl.so`)                   |
+| nlohmann_json                     | 3.10.5 (`/usr/lib/cmake/nlohmann_json/nlohmann_jsonConfig.cmake`)  |
+| yaml-cpp                          | system pkg (`libyaml-cpp-dev` per CLAUDE.md apt list)              |
+| OpenSSL                           | 3.0.2 (`/usr/lib/aarch64-linux-gnu/libcrypto.so`)                  |
+| Vendor SDK (per M5a)              | 1.4.3                                                              |
+| `xhand_control_sdk/lib/libxhand_control.so` | aarch64 ELF (M5a baseline; unchanged in M5b)             |
 
 ### 11.2 Build (§6.4)
 
-- `cmake ..` exit code: ___
-- `make -j$(nproc)` exit code: ___
-- `file ./udex_to_xhand` → ___
-- `ldd ./udex_to_xhand | grep xhand` → ___
+- `cmake -DBUILD_TESTS=ON ..` exit code: **0** (log ends with `-- Build files have been written to: /home/unitree/udex_to_xhand/build`)
+- `make -j$(nproc)` exit code: **0** (log ends with `[100%] Built target test_mapper_snapshot`)
+- Targets produced: `udex_to_xhand` + `test_mapper_snapshot`
+- `file ./udex_to_xhand`: not explicitly captured, but runtime success on PC2 (aarch64) implies ELF aarch64 LSB executable
+- `ldd ./udex_to_xhand`: not explicitly captured, but binary loads + executes — vendor `.so` resolves via baked RPATH per CMakeLists.txt § "Vendor .so lives outside the system library path"
 
 ### 11.3 Mock run (§6.5)
 
-- ticks observed: ___ (expected ~300)
-- duration: ___ s (expected ~3.0)
-- joint count per line: L=12 R=12 (Y/N)
-- errors in log: ___
+- ticks observed: **300** (expected ~300) — exit line `[INFO] exited after 3.0s, 300 ticks, 300 valid frames`
+- duration: **3.0 s**
+- joint count per line: L=12 R=12 ✅ (verified by inspection of `[tick   1]` … `[tick 300]` lines)
+- errors in log: **0**
+- Sample values (constant across all 300 ticks since mock loops same parsed frame): L = `[+0.498, -0.175, +0.000, +0.000, +0.229, +0.227, +0.023, +0.091, +0.159, +0.244, +0.431, +0.544]`, R = `[+0.249, -0.175, +0.021, +0.000, +0.134, +0.191, +0.070, +0.106, +0.033, +0.085, +0.201, +0.248]`
 
 ### 11.4 Snapshot test (§6.6)
 
-- fixture SHA match: ___
-- L max |Δ| (rad): ___ (tol 1e-6)
-- R max |Δ| (rad): ___ (tol 1e-6)
-- exit code: ___
+- fixture SHA match: **OK** (`[INFO] fixture SHA-256 match: example.json + config.yaml unchanged`)
+- L max |Δ| (rad): **0.0e+00** (bit-identical Python ↔ C++) — tol 1.0e-06 → PASS
+- R max |Δ| (rad): **1.4e-17** (IEEE-754 round-off on `0.6 * x + 0.4 * y`) — tol 1.0e-06 → PASS
+- exit code: **0** (`[INFO] all 24 joints within tolerance`)
 
 ### 11.5 Receiver-only (§6.7)
 
-- Windows UDCAP reachable from PC2: Y / N
-- packets received in 10s: ___
-- parse errors: ___
-- (if N): timeout behavior graceful: Y / N
+- Windows UDCAP reachable from PC2: **Y**
+- First-packet source IP: `192.168.3.24`
+- packets received in 10s: **616 valid frames** (steady-state ~62 Hz, matches UDCAP HandDriver 60 Hz config)
+- ticks attempted: **1000** (100 Hz loop × 10 s) — ~38% of ticks see EAGAIN (UDP at 60 Hz < tick rate 100 Hz)
+- parse errors: **0**
+- calib observed: L=3 R=3 stable throughout
 
 ### 11.6 Static checks (§6.8)
 
-- `grep warning docs/logs/m5b-make-*.log`: ___ (expected 0)
+- `grep -E '(warning|error):' docs/logs/m5b-make-2026-05-18.log` → **no diagnostics** ✅
 
 ### 11.7 Anomalies / notes
 
-- (free-form, like M5a §6)
+- **Right-hand UDCAP values all zero in §6.7** — `r0..r23 = 0.0` for the entire 10-second run despite `R_CalibrationStatus == 3`. This is UDCAP HandDriver behavior (right glove either not worn, not moved, or reporting nominal calib without active sensing). Not an M5b issue — the receiver correctly parsed what was sent. M5c will revisit when right XHand + right glove are wired up together.
+- **Snapshot L diff = exactly 0.0** — Python's `for s, w in zip(sources, weights): wsum += w * src[s]` and C++ `for (size_t i = 0; i < sources.size(); ++i) acc += weights[i] * src[sources[i]]` produce identical IEEE-754 doubles for the left-hand inputs. R differs only by 1.4e-17 because right-hand `index_joint2` / `mid_joint2` / etc. use 2-source weighted sums (`[0.6, 0.4]`) on values that exercise a different accumulator order at the binary level. Both well below joint encoder resolution (1e-6 rad ≈ 5.7e-5 deg ≪ XHand position step).
+- **No explicit `file` / `ldd` capture**: M5b §6.4 expected output included `file ./udex_to_xhand` + `ldd | grep xhand` checks, but the operator's archived logs don't include them. Acceptable since the binary clearly loaded and executed on PC2 (aarch64) during §6.5 / §6.7 — if the RPATH had been broken, `./udex_to_xhand` would not start. Worth capturing explicitly in M5c for completeness.
 
 ---
 

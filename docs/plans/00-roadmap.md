@@ -5,6 +5,7 @@
 - 2026-05-16 — 第 1 次修订 — 部署主机切换到宇树 G1 PC2 (aarch64)；新增 M5 (Port to G1 PC2)，原 M5/M6/M7 顺延为 M6/M7/M8。详见 [ADR-023](../decisions/023-roadmap-pivot-g1-pc2-as-host.md).
 - 2026-05-16 — 第 2 次修订 — 发现厂商提供的是 `xhand_control_sdk/` (aarch64 **C++** SDK + headers + .so)，**没有 Python wheel**。M5 阻塞解除；决定弃用 Python 算法栈，**在 PC2 上把 M1/M3/M4 的 Python 模块整体重写为单一 C++ 二进制**，避免 Python↔C++ FFI 跨语言开销，并匹配仓库内 `xhand_control_ros2.hpp` 的语言基线。`config.yaml`/ADRs/example.json 等已验证资产保留。M5 拆为 M5a/M5b/M5c，工期估算 0.5d → 2d。CLAUDE.md / SPEC.md 中的 Python 基线需在 M5 完成后同步更新。
 - 2026-05-18 — 第 3 次修订 — M5a 在 G1 PC2 上执行通过（左手，joint 4 ±0.1 rad，SDK 1.4.3，hand_id=1，serial 012L320220250728005）。新增 ADR-024 / 025 / 026 / 027 记录 M5a 非显然决定（vendor 示例作 bring-up harness / 厂商源不入库 / 沿用厂商 PID kp=225 / joint 4 作 smoke joint）。Execution Record 见 [plan §6](./20260516-m5a-vendor-sdk-pc2-bringup-plan.md#6-execution-record--filled-2026-05-18)，日志归档 `docs/logs/m5a-test-serial-2026-05-18.log`。
+- 2026-05-18 — 第 4 次修订 — M5b 在 G1 PC2 上执行通过（C++17 单二进制 `udex_to_xhand` 落地；mock 300/300 ticks；snapshot test L max |Δ|=0.0e+00 rad / R max |Δ|=1.4e-17 rad，远低于 1e-6 tolerance；receiver-only @ UDCAP 192.168.3.24 收 616/1000 包 0 parse errors；`-Wall -Wextra -Wpedantic` 无警告）。新增 ADR-028 / 029 / 030 / 031（纯 C++ 重写 / CalibrationStatus pre-check 拆 UDCAP+XHand 两侧 / snapshot fixture 用 SHA-256 自校验 / `legacy_python/` 提前到 M5b 重组）。`legacy_python/` 创建于本 milestone 作为 Python 原型的归集点。Execution Record 见 [plan §11](./20260518-m5b-cpp-rewrite-plan.md#11-6-execution-record-filled-at-end-of-m5b)，日志归档 `docs/logs/m5b-{cmake,make,mock-run,snapshot-test,receiver}-2026-05-18.log`。
 
 ---
 
@@ -184,15 +185,16 @@ python main.py --config config.yaml --hand left
 - 验收: 能枚举 hand_id、显示 type/SN、单关节 send_command 成功 → 证明硬件 + .so 在 PC2 上闭环可用
 - **结果 (2026-05-18)**: SDK 1.4.3 / hand_id=1 / type=L / SN=012L320220250728005 / joint 4 commanded 0.1 rad → read-back 0.0843551 rad (> 0.05 阈值)。详见 [bring-up plan](./20260516-m5a-vendor-sdk-pc2-bringup-plan.md) + ADRs 024/025/026/027。
 
-### M5b · 项目 C++ 化 (1d)
+### M5b · 项目 C++ 化 (1d) ✅
 - 新建 `src/` + 顶层 `CMakeLists.txt` (`find_package(xhand_control HINTS xhand_control_sdk/share)`)，产出 `udex_to_xhand` 可执行文件
 - 重写以下模块（对应 Python 文件功能逐一翻译，行为不变）:
   - `main.cpp`: 100Hz 控制循环 + SIGINT/SIGTERM 处理 + CLI args (`--config`, `--hand`, `--duration`, `--mock`)
   - `udcap_receiver.{hpp,cpp}`: 非阻塞 UDP socket，nlohmann_json 解析，提取 l0-l23 / r0-r23，CalibStatus!=3 跳帧
   - `joint_mapper.{hpp,cpp}`: yaml-cpp 读 `config.yaml`，加权求和 + 符号翻转 + deg→rad + clamp
-  - `xhand_driver.{hpp,cpp}`: 包装 `xhand_control::XHandControl`（open_serial → list_hands_id → send_command → close_device）
-  - `safety.{hpp,cpp}`: watchdog (200ms 无 UDP) + per-joint clamp 作为 fail-safe
+  - `xhand_driver.{hpp,cpp}`: 包装 `xhand_control::XHandControl`（open_serial → list_hands_id → send_command → close_device）；按 ADR-029 不读 XHand 端 calib
+  - `safety.{hpp,cpp}`: watchdog (200ms 无 UDP) + per-joint clamp 作为 fail-safe (二层防御)
 - 单元级验收: `--mock` 模式以 ~100Hz 打印左右手 12 关节值 (等价于原 Python M0 stub 验收)
+- **结果 (2026-05-18)**: build 干净（g++ 11.4.0 / nlohmann_json 3.10.5 / OpenSSL 3.0.2 / CURL 7.81.0；`-Wall -Wextra -Wpedantic` 0 警告）。mock 300 ticks 全部产生 12+12 关节输出。Snapshot 等价测试 L max |Δ|=**0.0e+00 rad**、R max |Δ|=**1.4e-17 rad**（远低于 1e-6 tolerance；Python ↔ C++ 算法位级一致）。Receiver-only 在 UDCAP @ 192.168.3.24 在线时收 616/1000 ticks、0 parse errors、calib L=3 R=3 稳定 10s。Python 原型 6 个文件迁入 `legacy_python/`，`joint_mapper.py` 留作 snapshot oracle。详见 [plan §11](./20260518-m5b-cpp-rewrite-plan.md#11-6-execution-record-filled-at-end-of-m5b) + ADRs 028/029/030/031。
 
 ### M5c · PC2 上重跑 M3 / M4 验收 (0.5d)
 - XHand 接 PC2 USB，确认 `/dev/ttyACM*` 枚举 (ADR-014)
@@ -219,7 +221,7 @@ ls ./udex_to_xhand   # 预期: ELF aarch64 可执行文件
 ```
 
 **依赖**: M4 (Python 版算法已验证，`config.yaml` 数据已校准), G1 PC2 已刷 Linux, `xhand_control_sdk/` 已就绪 ✅
-**ADRs**: 023 (pivot to G1 PC2); 024 (vendor sample as M5a harness); 025 (vendor source pristine, sed not committed); 026 (M5a uses vendor PID defaults, not CLAUDE.md); 027 (joint 4 ±0.1 rad as smoke joint); **待新增** ADR (M5b 实施时记录: 选择纯 C++ 重写而非 pybind11/ctypes binding 的理由 — FFI 成本、reference 语言一致性、deployment 简化)
+**ADRs**: 023 (pivot to G1 PC2); 024 (vendor sample as M5a harness); 025 (vendor source pristine, sed not committed); 026 (M5a uses vendor PID defaults, not CLAUDE.md); 027 (joint 4 ±0.1 rad as smoke joint); 028 (pure C++ rewrite, no pybind11/ctypes binding); 029 (CalibrationStatus pre-check is UDCAP-side only — XHand driver does not assert it); 030 (snapshot fixture as committed JSON with SHA-256 self-check); 031 (`legacy_python/` reorg performed during M5b, user-directed)
 **Post-M5 文档同步**: 完成后需更新 CLAUDE.md (Python 3.10+ 基线 → C++17 + cmake)、SPEC.md、README 中关于运行命令与依赖的部分
 
 ---
@@ -343,16 +345,16 @@ M0 (skeleton)
 
 ## 时间估算
 
-| Milestone               | 估算 | 累计 |
-| ----------------------- | ---- | ---- |
-| M0 Skeleton             | 0.5d | 0.5d |
-| M1 UDP Receiver         | 0.5d | 1d   |
-| M2 Param Verify         | 0.5d | 1.5d |
-| M3 XHand Driver         | 0.5d | 2d   |
-| M4 Single-hand Teleop   | 1d   | 3d   |
-| M5 C++ Port to G1 PC2   | 2d   | 5d   |
-| M6 Safety (C++)         | 0.5d | 5.5d |
-| M7 Dual Hand            | 0.5d | 6d   |
-| M8 Tuning + Acceptance  | 1d   | 7d   |
+| Milestone              | 估算 | 累计 |
+| ---------------------- | ---- | ---- |
+| M0 Skeleton            | 0.5d | 0.5d |
+| M1 UDP Receiver        | 0.5d | 1d   |
+| M2 Param Verify        | 0.5d | 1.5d |
+| M3 XHand Driver        | 0.5d | 2d   |
+| M4 Single-hand Teleop  | 1d   | 3d   |
+| M5 C++ Port to G1 PC2  | 2d   | 5d   |
+| M6 Safety (C++)        | 0.5d | 5.5d |
+| M7 Dual Hand           | 0.5d | 6d   |
+| M8 Tuning + Acceptance | 1d   | 7d   |
 
 M1 和 M3 无依赖关系，可并行。最快路径: **7 天** (M5 因厂商仅提供 C++ SDK，含 M5a 原生验证 / M5b 项目 C++ 化 / M5c PC2 验收 三个子阶段，工期从 0.5d 升到 2d)。
