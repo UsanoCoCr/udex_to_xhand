@@ -26,7 +26,7 @@ G1 PC2, aarch64 Linux (this project, C++17 + cmake)
 
 **Vendor SDK**: `xhand_control_sdk/` ships aarch64 `libxhand_control.so` + C++ headers; linked via `find_package(xhand_control HINTS xhand_control_sdk/share)`. No Python wheel route on aarch64.
 
-**Migration status**: M0–M4 prototype was Python (`main.py`, `udcap_receiver.py`, `joint_mapper.py`, `xhand_driver.py`, `safety.py`). M5 rewrites the runtime stack to C++ on PC2. Until M5b lands, the Python files remain as reference for the verified algorithm but are no longer the deploy target. See roadmap §M5.
+**Migration status**: M0–M4 prototype was Python (`main.py`, `udcap_receiver.py`, `joint_mapper.py`, `xhand_driver.py`, `safety.py` — moved to `legacy_python/` in M5b). M5b lands the C++ runtime stack as the authoritative implementation: single binary `udex_to_xhand` built from `src/*.{hpp,cpp}` + top-level `CMakeLists.txt`. Only `legacy_python/joint_mapper.py` retains a live role — it is the snapshot oracle for `tests/test_mapper_snapshot.cpp` (regenerated via `scripts/dump_mapper_baseline.py`). The rest have zero runtime callers; full removal is a post-M5c candidate. See roadmap §M5 and `legacy_python/README.md`.
 
 ## Key data flow
 
@@ -99,7 +99,7 @@ ls ./udex_to_xhand       # expected: ELF aarch64
 - Do NOT hardcode joint mapping — everything through config.yaml
 - Do NOT add a pybind11 / ctypes / cffi layer over the C++ SDK — runtime stack is pure C++ (rationale: roadmap §M5 revision 2; memory `feedback_no_unnecessary_ffi.md`)
 - Do NOT reintroduce Python into the realtime control loop — Python is for offline scripts / experiments only
-- Do NOT send commands to XHand before verifying hand IDs and CalibrationStatus==3
+- Do NOT send commands to XHand before (a) `list_hands_id()` reports the expected hand(s) AND (b) the most recent UDCAP frame has `L_/R_CalibrationStatus == 3`. The CalibrationStatus check is a **UDCAP-side** field (see SPEC §5); the XHand SDK does not expose a hand-level calibration status (the `CalibrationStatus` enum in `data_type.hpp` is a per-finger calibration-error code, not a state). Enforce (a) in `XHandDriver::open()`, (b) in `UdcapReceiver::try_recv()`.
 - Do NOT send commands without clamping to joint limits first
 
 ## Safety (non-negotiable)

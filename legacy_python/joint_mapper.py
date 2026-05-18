@@ -86,13 +86,15 @@ class JointMapper:
 if __name__ == "__main__":
     import yaml
 
-    config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    # Moved to legacy_python/ in M5b; config.yaml + example.json stay at repo root.
+    _ROOT = os.path.join(os.path.dirname(__file__), "..")
+    config_path = os.path.join(_ROOT, "config.yaml")
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
     mapper = JointMapper(config.get("mapping", {}))
 
-    example_path = os.path.join(os.path.dirname(__file__), "example.json")
+    example_path = os.path.join(_ROOT, "example.json")
     with open(example_path) as f:
         raw = json.load(f)
     frame_key = next(iter(raw))

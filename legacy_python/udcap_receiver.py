@@ -20,7 +20,8 @@ class UdcapReceiver:
         self._last_addr = None
 
         if mock:
-            example_path = os.path.join(os.path.dirname(__file__), "example.json")
+            # Moved to legacy_python/ in M5b; example.json stays at repo root.
+            example_path = os.path.join(os.path.dirname(__file__), "..", "example.json")
             with open(example_path) as f:
                 raw = json.load(f)
             self._mock_data = self._parse(raw)
