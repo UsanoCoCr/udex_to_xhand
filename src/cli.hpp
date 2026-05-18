@@ -15,7 +15,8 @@ struct Args {
     double duration{0.0};                  // 0 = run until signal
     HandSelect hand{HandSelect::Both};
     std::optional<std::string> port_override;   // overrides xhand.serial_port
-    std::optional<std::string> actions;         // M5c scope; rejected with error in M5b
+    std::optional<std::string> actions;         // Comma-separated preset names (M3 equivalent); see preset_actions.hpp
+    double hold{1.0};                           // Per-preset hold seconds; only meaningful with --actions
     bool help{false};
 };
 

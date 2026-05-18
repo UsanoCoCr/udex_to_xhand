@@ -8,6 +8,7 @@
 // Per CLAUDE.md "Architecture" §, this binary replaces main.py + udcap_receiver.py +
 // joint_mapper.py + xhand_driver.py + safety.py from M0-M4.
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -15,16 +16,19 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <numeric>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <yaml-cpp/yaml.h>
 
 #include "cli.hpp"
 #include "joint_mapper.hpp"
 #include "logging.hpp"
+#include "preset_actions.hpp"
 #include "safety.hpp"
 #include "udcap_receiver.hpp"
 #include "xhand_driver.hpp"
@@ -99,6 +103,103 @@ std::string fmt_raw24(const std::array<double, 24>& v, char prefix) {
     return os.str();
 }
 
+// Per-frame end-to-end (receive→post-send) latency accumulator. Plan §3.2.
+// Bounded by N = update_rate_hz × session_seconds; ≤ 30k for M5c's 30s session,
+// so vector + sort for p95 is preferable to streaming approximations.
+struct LatencyStats {
+    std::vector<double> samples_ms;
+
+    void add(double ms) { samples_ms.push_back(ms); }
+    bool empty() const { return samples_ms.empty(); }
+
+    void summary(std::ostream& os) const {
+        if (samples_ms.empty()) { os << "latency_ms{no samples}"; return; }
+        std::vector<double> s = samples_ms;
+        std::sort(s.begin(), s.end());
+        const size_t n = s.size();
+        const double sum = std::accumulate(s.begin(), s.end(), 0.0);
+        auto pct = [&](double q) {
+            return s[std::min(n - 1, static_cast<size_t>(q * (n - 1)))];
+        };
+        os << "latency_ms{n=" << n
+           << " min=" << s.front()
+           << " avg=" << (sum / n)
+           << " p50=" << pct(0.50)
+           << " p95=" << pct(0.95)
+           << " max=" << s.back() << "}";
+    }
+};
+
+// --actions mode (M3 equivalent). No UDP, no mapper — open driver, send each
+// preset (deg→rad + safety clamp), hold args.hold seconds, repeat. Plan §3.2.
+int run_actions(const cli::Args& args, const XHandConfig& xc) {
+    std::vector<const preset_actions::Preset*> list;
+    {
+        std::stringstream ss(*args.actions);
+        std::string name;
+        while (std::getline(ss, name, ',')) {
+            const auto l = name.find_first_not_of(" \t");
+            const auto r = name.find_last_not_of(" \t");
+            name = (l == std::string::npos) ? std::string{} : name.substr(l, r - l + 1);
+            if (name.empty()) continue;
+            const auto* p = preset_actions::find_preset(name);
+            if (!p) {
+                LOG_ERROR("unknown preset: '" << name << "' (known: fist|palm|v|ok)");
+                return 2;
+            }
+            list.push_back(p);
+        }
+    }
+    if (list.empty()) {
+        LOG_ERROR("--actions: empty preset list");
+        return 2;
+    }
+
+    XHandDriver driver(xc.serial_port, xc.baud_rate, xc.pid);
+    try {
+        driver.open();
+    } catch (const std::exception& e) {
+        LOG_ERROR("XHandDriver: " << e.what());
+        return 2;
+    }
+
+    std::atomic<bool> shutdown_flag{false};
+    safety::install_signal_handlers(shutdown_flag);
+
+    const auto hold = std::chrono::milliseconds(
+        static_cast<long long>(args.hold * 1000.0));
+
+    for (const auto* p : list) {
+        if (shutdown_flag.load()) break;
+
+        auto rad = preset_actions::deg_to_rad(p->deg);
+        safety::clamp_in_place(rad);
+
+        try {
+            if (driver.has_left())  driver.send_left(rad);
+            if (driver.has_right()) driver.send_right(rad);
+        } catch (const std::exception& e) {
+            LOG_ERROR("send: " << e.what());
+            break;
+        }
+
+        LOG_INFO("Action " << p->name << ": sent 12 joints, OK");
+
+        const auto deadline = std::chrono::steady_clock::now() + hold;
+        while (!shutdown_flag.load() &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+
+    try {
+        driver.shutdown();
+    } catch (const std::exception& e) {
+        LOG_WARN("shutdown: " << e.what());
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -116,10 +217,18 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (args.actions) {
-        std::cerr << "ERROR: --actions (preset-action mode) is M5c scope; "
-                  << "not implemented in M5b. Use the vendor test_serial from M5a "
-                  << "(xhand_control_sdk/tests/build/test_serial) for now.\n";
-        return 2;
+        // M5c: actions mode tolerates missing/invalid config — defaults + --port
+        // are sufficient to drive the XHand. Plan §3.2.
+        YAML::Node root;
+        try {
+            root = YAML::LoadFile(args.config_path);
+        } catch (const std::exception&) {
+            // Silent fall-through to defaults; XHandConfig{} + --port covers
+            // the canonical M3-equivalent command shape.
+        }
+        XHandConfig xc = root.IsNull() ? XHandConfig{} : load_xhand_config(root);
+        if (args.port_override) xc.serial_port = *args.port_override;
+        return run_actions(args, xc);
     }
 
     YAML::Node root;
@@ -199,6 +308,7 @@ int main(int argc, char** argv) {
     long tick = 0;
     long valid_frames = 0;
     bool first_packet_logged = false;
+    LatencyStats latency_stats;
 
     if (!args.mock) LOG_INFO("waiting for first packet...");
 
@@ -249,6 +359,16 @@ int main(int argc, char** argv) {
                 break;
             }
 
+            // Plan §3.2: sample receive→post-send latency once per frame,
+            // only in FULL mode (driver engaged). recv_ts is steady_clock.
+            if (driver) {
+                using namespace std::chrono;
+                const auto t1 = steady_clock::now();
+                const double ms =
+                    duration<double, std::milli>(t1 - frame_opt->recv_ts).count();
+                latency_stats.add(ms);
+            }
+
             if (args.mock) {
                 std::cout << "[tick " << std::setw(3) << std::setfill(' ') << tick << "]";
                 if (left_rad)  std::cout << " L: " << fmt_joints_rad(*left_rad);
@@ -275,6 +395,12 @@ int main(int argc, char** argv) {
     if (driver) {
         try { driver->shutdown(); }
         catch (const std::exception& e) { LOG_WARN("shutdown: " << e.what()); }
+    }
+
+    if (!latency_stats.empty()) {
+        std::ostringstream lat;
+        latency_stats.summary(lat);
+        LOG_INFO(lat.str());
     }
 
     using namespace std::chrono;

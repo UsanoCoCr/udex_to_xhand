@@ -15,7 +15,8 @@ void print_usage(std::ostream& os, const char* prog) {
        << "  --duration <sec>           Auto-exit after N seconds (default: run until signal)\n"
        << "  --hand <left|right|both>   Which hand(s) to drive (default: both)\n"
        << "  --port <path>              Override xhand.serial_port from config\n"
-       << "  --actions <names>          Comma-separated preset names (fist,palm,v,ok) — M5c scope\n"
+       << "  --actions <names>          Comma-separated preset names (fist,palm,v,ok) — M3 equiv\n"
+       << "  --hold <sec>               Per-preset hold (default: 1.0); only with --actions\n"
        << "  --help, -h                 Print this message and exit\n";
 }
 
@@ -28,6 +29,9 @@ static std::string next_value(int argc, char** argv, int& i, const std::string& 
 
 Args parse(int argc, char** argv) {
     Args a;
+    bool hold_seen = false;
+    bool duration_seen = false;
+
     for (int i = 1; i < argc; ++i) {
         std::string f = argv[i];
         if (f == "--help" || f == "-h") {
@@ -40,6 +44,7 @@ Args parse(int argc, char** argv) {
             a.receiver_only = true;
         } else if (f == "--duration") {
             a.duration = std::stod(next_value(argc, argv, i, f));
+            duration_seen = true;
         } else if (f == "--hand") {
             std::string v = next_value(argc, argv, i, f);
             if      (v == "left")  a.hand = HandSelect::Left;
@@ -50,13 +55,31 @@ Args parse(int argc, char** argv) {
             a.port_override = next_value(argc, argv, i, f);
         } else if (f == "--actions") {
             a.actions = next_value(argc, argv, i, f);
+        } else if (f == "--hold") {
+            a.hold = std::stod(next_value(argc, argv, i, f));
+            hold_seen = true;
         } else {
             throw std::runtime_error("Unknown flag: " + f);
         }
     }
+
     if (a.mock && a.receiver_only) {
         throw std::runtime_error("--mock and --receiver-only are mutually exclusive");
     }
+    if (a.actions && a.mock) {
+        throw std::runtime_error("--actions and --mock are mutually exclusive");
+    }
+    if (a.actions && a.receiver_only) {
+        throw std::runtime_error("--actions and --receiver-only are mutually exclusive");
+    }
+    if (a.actions && duration_seen) {
+        throw std::runtime_error("--actions and --duration are mutually exclusive "
+                                  "(actions total time is N × --hold)");
+    }
+    if (hold_seen && !a.actions) {
+        throw std::runtime_error("--hold is only valid with --actions");
+    }
+
     return a;
 }
 
