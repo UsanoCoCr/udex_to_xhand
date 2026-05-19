@@ -17,7 +17,8 @@ void clamp_in_place(std::array<double, 12>& rad);
 
 // Watchdog tracks the time of the last valid UDP frame. is_stale returns true if
 // the most recent update is older than `timeout` or if no frame has ever been seen.
-// The "hold last position on stale" reaction is M6 scope; M5b only wires the class.
+// Stale reaction (resend last commanded rad + 1Hz LOG_WARN) is wired in
+// main.cpp per M6 plan §2.1; see ADR-035.
 class Watchdog {
  public:
     explicit Watchdog(std::chrono::milliseconds timeout);

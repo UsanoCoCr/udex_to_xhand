@@ -65,4 +65,14 @@ if(BUILD_TESTS)
         yaml-cpp
         OpenSSL::Crypto)
     target_compile_options(test_mapper_snapshot PRIVATE -Wall -Wextra -Wpedantic)
+
+    # M6: safety primitives unit test. Pure C++ against safety.{hpp,cpp} —
+    # does NOT link xhand_control / yaml-cpp / nlohmann_json / OpenSSL, so
+    # this target builds and runs on hosts without the vendor aarch64 .so
+    # (e.g., darwin/arm64 dev machines).
+    add_executable(test_safety
+        tests/test_safety.cpp
+        src/safety.cpp)
+    target_include_directories(test_safety PRIVATE src)
+    target_compile_options(test_safety PRIVATE -Wall -Wextra -Wpedantic)
 endif()

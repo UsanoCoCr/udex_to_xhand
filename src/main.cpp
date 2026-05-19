@@ -38,7 +38,8 @@ namespace {
 struct UdcapConfig {
     std::string host{"0.0.0.0"};
     int port{9000};
-    int timeout_ms{200};
+    int timeout_ms{200};         // watchdog stale threshold
+    int startup_timeout_s{10};   // M6: startup gate (no calibrated frame → abort)
 };
 
 struct XHandConfig {
@@ -52,9 +53,10 @@ UdcapConfig load_udcap_config(const YAML::Node& root) {
     UdcapConfig c;
     auto u = root["udcap"];
     if (u) {
-        if (u["host"])       c.host       = u["host"].as<std::string>();
-        if (u["port"])       c.port       = u["port"].as<int>();
-        if (u["timeout_ms"]) c.timeout_ms = u["timeout_ms"].as<int>();
+        if (u["host"])              c.host              = u["host"].as<std::string>();
+        if (u["port"])              c.port              = u["port"].as<int>();
+        if (u["timeout_ms"])        c.timeout_ms        = u["timeout_ms"].as<int>();
+        if (u["startup_timeout_s"]) c.startup_timeout_s = u["startup_timeout_s"].as<int>();
     }
     return c;
 }
@@ -129,6 +131,32 @@ struct LatencyStats {
            << " max=" << s.back() << "}";
     }
 };
+
+// M6: Startup gate. Polls `rx.try_recv()` at 100Hz until the first calibrated
+// frame arrives, or `timeout` elapses, or `shutdown_flag` flips. Returns the
+// frame on success; nullopt on timeout / signal. Logs the wait + the abort.
+// See plan §2.2 / §3.1 + ADR-036. Polls at the same 10ms cadence as the main
+// loop so wake-up latency is bounded by one tick.
+std::optional<UdcapFrame> wait_first_valid_frame(
+    UdcapReceiver& rx,
+    std::chrono::seconds timeout,
+    const std::atomic<bool>& shutdown_flag)
+{
+    using namespace std::chrono;
+    LOG_INFO("waiting for first calibrated UDP frame (timeout="
+             << timeout.count() << "s)...");
+    const auto deadline = steady_clock::now() + timeout;
+    while (!shutdown_flag.load()) {
+        if (auto f = rx.try_recv()) return f;
+        if (steady_clock::now() >= deadline) {
+            LOG_ERROR("startup gate: no calibrated UDP frame in "
+                      << timeout.count() << "s; aborting");
+            return std::nullopt;
+        }
+        std::this_thread::sleep_for(milliseconds(10));
+    }
+    return std::nullopt;
+}
 
 // --actions mode (M3 equivalent). No UDP, no mapper — open driver, send each
 // preset (deg→rad + safety clamp), hold args.hold seconds, repeat. Plan §3.2.
@@ -302,6 +330,19 @@ int main(int argc, char** argv) {
         }
     }
 
+    // M6: Startup gate (plan §2.2 / §3.1, ADR-036). Skip in mock (uses
+    // synthesized frame). In FULL or receiver-only, block until first calibrated
+    // frame or timeout. Gate failure → exit 2; in FULL mode the std::optional
+    // XHandDriver destructor still runs shutdown() (mode=0 + close_device).
+    std::optional<UdcapFrame> primed_frame;
+    if (!args.mock) {
+        primed_frame = wait_first_valid_frame(
+            *receiver,
+            std::chrono::seconds(udcap_cfg.startup_timeout_s),
+            shutdown_flag);
+        if (!primed_frame) return 2;
+    }
+
     safety::Watchdog wdog(std::chrono::milliseconds(udcap_cfg.timeout_ms));
 
     int rate_hz = std::max(1, xhand_cfg.update_rate_hz);
@@ -315,7 +356,12 @@ int main(int argc, char** argv) {
     bool first_packet_logged = false;
     LatencyStats latency_stats;
 
-    if (!args.mock) LOG_INFO("waiting for first packet...");
+    // M6 (plan §3.2): per-frame send cache for stale-resend; recovery tracking.
+    // last_warn_ts is initialized far in the past so the first stale WARN
+    // fires immediately on entry to the stale branch.
+    std::optional<std::array<double, 12>> last_left_rad, last_right_rad;
+    bool was_stale = false;
+    auto last_warn_ts = std::chrono::steady_clock::now() - std::chrono::seconds(10);
 
     auto duration_elapsed = [&]() {
         if (args.duration <= 0) return false;
@@ -332,6 +378,11 @@ int main(int argc, char** argv) {
         if (args.mock) {
             frame_opt = *mock_frame;
             frame_opt->recv_ts = tick_start;
+        } else if (primed_frame) {
+            // M6: consume the gate-supplied first frame so the first loop
+            // tick is productive (don't waste it on another try_recv).
+            frame_opt = std::move(primed_frame);
+            primed_frame.reset();
         } else {
             frame_opt = receiver->try_recv();
         }
@@ -339,6 +390,18 @@ int main(int argc, char** argv) {
         if (frame_opt) {
             ++valid_frames;
             wdog.update(frame_opt->recv_ts);
+
+            // M6: stale → fresh transition. last_warn_ts was the time of the
+            // most recent stale WARN; gap from that to now approximates the
+            // outage length seen by the operator.
+            if (was_stale) {
+                using namespace std::chrono;
+                const auto gap_ms =
+                    duration<double, std::milli>(tick_start - last_warn_ts).count();
+                LOG_INFO("watchdog: recovered after " << gap_ms << "ms");
+                was_stale = false;
+            }
+
             if (!first_packet_logged && !args.mock) {
                 LOG_INFO("first packet from " << receiver->last_sender_ip());
                 first_packet_logged = true;
@@ -350,13 +413,19 @@ int main(int argc, char** argv) {
                     auto v = mapper.map_left(frame_opt->l);
                     safety::clamp_in_place(v);
                     left_rad = v;
-                    if (driver) driver->send_left(v);
+                    if (driver) {
+                        driver->send_left(v);
+                        last_left_rad = v;     // M6: cache for stale resend
+                    }
                 }
                 if (args.hand != cli::HandSelect::Left) {
                     auto v = mapper.map_right(frame_opt->r);
                     safety::clamp_in_place(v);
                     right_rad = v;
-                    if (driver) driver->send_right(v);
+                    if (driver) {
+                        driver->send_right(v);
+                        last_right_rad = v;    // M6: cache for stale resend
+                    }
                 }
             } catch (const std::exception& e) {
                 LOG_ERROR("send: " << e.what());
@@ -391,7 +460,29 @@ int main(int argc, char** argv) {
                           << " | fps=" << std::fixed << std::setprecision(1) << fps
                           << std::endl;
             }
+        } else if (driver && wdog.has_seen_frame() && wdog.is_stale(tick_start)) {
+            // M6 (plan §2.1 / §3.2, ADR-035): stale — resend last commanded
+            // rad to keep the position controller's last setpoint alive over
+            // RS485; WARN log rate-limited to 1Hz so 30-min stress still fits.
+            // Stale ticks do NOT update latency_stats (no fresh recv_ts).
+            try {
+                if (last_left_rad)  driver->send_left (*last_left_rad);
+                if (last_right_rad) driver->send_right(*last_right_rad);
+            } catch (const std::exception& e) {
+                LOG_ERROR("stale resend: " << e.what());
+                shutdown_flag.store(true);
+                break;
+            }
+            using namespace std::chrono;
+            if (tick_start - last_warn_ts >= seconds(1)) {
+                LOG_WARN("watchdog: no UDP for >"
+                         << udcap_cfg.timeout_ms << "ms, holding last position");
+                last_warn_ts = tick_start;
+            }
+            was_stale = true;
         }
+        // else: no frame, but either no driver (mock / receiver-only) or
+        //   watchdog not yet stale — nothing to do this tick.
 
         next_tick += period;
         std::this_thread::sleep_until(next_tick);

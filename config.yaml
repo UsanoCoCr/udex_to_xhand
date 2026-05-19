@@ -2,6 +2,7 @@ udcap:
   host: "0.0.0.0"
   port: 9000
   timeout_ms: 200
+  startup_timeout_s: 10    # M6: abort if no calibrated UDP frame within N seconds
 
 xhand:
   protocol: "RS485"
