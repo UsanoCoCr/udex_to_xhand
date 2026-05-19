@@ -1,0 +1,79 @@
+xhand_control initialized 1.4.3
+/dev/ttyACM0
+/dev/ttyACM1
+/dev/ttyACM2
+/dev/ttyACM3
+/dev/ttyS0
+/dev/ttyS1
+/dev/ttyS2
+/dev/ttyS3
+try open device times: 1 / 3 
+Start reading data from serial port
+RS485 opened successfully
+hand id: 0
+type: R
+serial number: 012R3202C0707003
+save to flash okset name successfully,current name xhand
+Unknow Cmd!
+reset sensor successfully
+ plam version: 1.3.6
+***********************
+ firmware version: 3
+***********************
+ joint 0 version: 1.0.8
+ joint 1 version: 1.0.8
+ joint 2 version: 1.0.8
+ joint 3 version: 1.0.8
+ joint 4 version: 1.0.8
+ joint 5 version: 1.0.8
+ joint 6 version: 1.0.8
+ joint 7 version: 1.0.8
+ joint 8 version: 1.0.8
+ joint 9 version: 1.0.8
+ joint 10 version: 1.0.8
+ joint 11 version: 1.0.8
+ finger 17 version: 1.0.4
+ finger 18 version: 1.0.4
+ finger 19 version: 1.0.4
+ finger 20 version: 1.0.4
+ finger 21 version: 1.0.4
+finger 0 parameter: 12627,-15360,0,0,0,0
+finger 1 parameter: 10752,2806,0,0,0,0
+finger 2 parameter: 29380,0,0,0,0,0
+finger 3 parameter: 0,0,0,0,0,0
+finger 4 parameter: -1,0,0,0,0,0
+finger 5 parameter: 511,0,0,0,0,0
+finger 6 parameter: 15370,23145,0,0,0,0
+finger 7 parameter: 30,-2455,0,0,0,0
+finger 8 parameter: 2570,28270,0,0,0,0
+finger 9 parameter: 2570,28270,0,0,0,0
+finger 10 parameter: 2570,28270,0,0,0,0
+finger 11 parameter: 2570,28270,0,0,0,0
+joint 0 action total counts: 1840
+joint 0 action direction counts: 6308
+joint 1 action total counts: 1686
+joint 1 action direction counts: 6883
+joint 2 action total counts: 1515
+joint 2 action direction counts: 5929
+joint 3 action total counts: 70
+joint 3 action direction counts: 71
+joint 4 action total counts: 1463
+joint 4 action direction counts: 5538
+joint 5 action total counts: 3504
+joint 5 action direction counts: 8058
+joint 6 action total counts: 2207
+joint 6 action direction counts: 7053
+joint 7 action total counts: 3035
+joint 7 action direction counts: 7602
+joint 8 action total counts: 2185
+joint 8 action direction counts: 7051
+joint 9 action total counts: 2694
+joint 9 action direction counts: 6963
+joint 10 action total counts: 2175
+joint 10 action direction counts: 6270
+joint 11 action total counts: 2136
+joint 11 action direction counts: 6176
+select follow num to choose fingure mode:
+	0	---	Passive Mode
+	3	---	Position Control Mode
+	5	---	Force Control Mode

@@ -1,0 +1,5 @@
+[INFO] fixture SHA-256 match: example.json + config.yaml unchanged
+[INFO] running JointMapper on example.json
+[INFO] L joints max |Δ| = 0.0e+00 rad  (tol 1.0e-06) → PASS
+[INFO] R joints max |Δ| = 1.4e-17 rad  (tol 1.0e-06) → PASS
+[INFO] all 24 joints within tolerance

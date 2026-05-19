@@ -1,0 +1,20 @@
+Consolidate compiler generated dependencies of target test_safety
+Consolidate compiler generated dependencies of target test_mapper_snapshot
+Consolidate compiler generated dependencies of target udex_to_xhand
+[ 14%] Building CXX object CMakeFiles/test_safety.dir/tests/test_safety.cpp.o
+[ 14%] Building CXX object CMakeFiles/test_safety.dir/src/safety.cpp.o
+[ 21%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/main.cpp.o
+[ 28%] Building CXX object CMakeFiles/test_mapper_snapshot.dir/tests/test_mapper_snapshot.cpp.o
+[ 35%] Building CXX object CMakeFiles/test_mapper_snapshot.dir/src/joint_mapper.cpp.o
+[ 42%] Linking CXX executable test_safety
+[ 42%] Built target test_safety
+[ 50%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/cli.cpp.o
+[ 57%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/udcap_receiver.cpp.o
+[ 64%] Building CXX object CMakeFiles/test_mapper_snapshot.dir/src/udcap_receiver.cpp.o
+[ 71%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/joint_mapper.cpp.o
+[ 78%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/xhand_driver.cpp.o
+[ 85%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/safety.cpp.o
+[ 92%] Linking CXX executable udex_to_xhand
+[ 92%] Built target udex_to_xhand
+[100%] Linking CXX executable test_mapper_snapshot
+[100%] Built target test_mapper_snapshot
