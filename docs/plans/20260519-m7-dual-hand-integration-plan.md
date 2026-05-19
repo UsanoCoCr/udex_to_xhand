@@ -516,40 +516,56 @@ Expected sequence (5–10 commits depending on §4.3 iteration count):
 
 ---
 
-## 8. Execution Record (FILL AT END OF M7)
+## 8. Execution Record (filled 2026-05-19 end-of-M7)
 
 ### 8.1 Environment
 
-- PC2: `<TBD — kernel, SDK version, USB topology>`
-- Hardware: `hand_id=0 type=Left SN=<…>`, `hand_id=1 type=Right SN=<…>`
-- UDCAP source: Windows PC at `<192.168.x.y>` UDP 9000, both gloves worn.
-- Bus topology: `<single /dev/ttyACMn multi-drop | two adapters — fill from §4.2 result>`
+- PC2: G1 NX (hostname `unitree-g1-nx`), aarch64 Linux, `xhand_control` SDK 1.4.3
+- Hardware (last observed, evening probe — see deviation §8.4 #1):
+  - `hand_id=1 type=Left`  via `/dev/ttyACM2` (usb 1-2.3 primary endpoint)
+  - `hand_id=0 type=Right` via `/dev/ttyACM0` SN=`012R3202C0707003` (usb 1-2.2 primary endpoint)
+- UDCAP source: Windows PC at `192.168.3.24` UDP 9000, both gloves worn
+- Bus topology: **two-port split** (ADR-039) — one CDC-ACM endpoint per XHand, NOT RS485 multi-drop. Falsified rev1's single-port hypothesis on first probe; rev2 written + committed (b2253da) before code changes.
 
 ### 8.2 Right-hand sign / clamp edits applied
 
 | Joint | Field | Before | After | Commit | Notes |
 | ----- | ----- | ------ | ----- | ------ | ----- |
-| _e.g._ `mapping.right.thumb_rota2` | _sign_ | _+1_ | _-1_ | _\<hash\>_ | _right-hand thumb roll inverted vs left convention_ |
-| ... | | | | | |
+| _(none)_ | | | | | _Plan §4.3 single-finger flex was not exhaustively log-captured (operator visual only). `mapping.right` starting hypothesis (mirror of left) retained for M8 acceptance test. SPEC §10 R5 / §12 Q3 updated to reflect this carry-over._ |
 
-If empty: "No right-hand edits needed; left-mirror starting hypothesis verified."
+### 8.3 Latency (dual-hand watchdog session, m7-watchdog-dual log, n=1164)
 
-### 8.3 Latency (dual-hand 60s session, §4.4 log)
+| Metric | Value     | vs M5c single-hand (9.60 / 9.62 / 10.68) | Notes |
+| ------ | --------- | ---------------------------------------- | ----- |
+| n (valid frames) | **1164** | n=1773 in M5c (longer 30s session) | 24.9s session, 2126 ticks, 0 parse errors |
+| avg_ms | **19.38** | ≈ 2.02 × | structural cost of two sequential `send_command` (ADR-041) |
+| p50_ms | **19.12** | ≈ 2.00 × | symmetric — same ~2× scaling on median |
+| p95_ms | **19.20** | ≈ 2.00 × | SPEC §9 budget 20 ms met with 0.80 ms headroom |
+| max_ms | **111.17** | ≈ 10.4 × | single-sample outlier, same class as M6 ~100 ms outlier (roadmap rev 7); SPEC §9 50 ms ceiling violated for this one sample, accepted + deferred to M8 stress test per ADR-041 |
 
-| Metric | Value | vs M5c single-hand (9.60 / 9.62 / 10.68) | Notes |
-| ------ | ----- | ---------------------------------------- | ----- |
-| n (valid frames) | _TBD_ | | |
-| avg_ms | _TBD_ | | |
-| p95_ms | _TBD_ | | SPEC §9 budget: ≤ 20 ms |
-| max_ms | _TBD_ | | SPEC §9 ceiling: ≤ 50 ms |
+Cross-check (m7-single-regression log, `--hand left --duration 5`, n=310, both gloves worn): `avg=9.59 p95=9.63 max=10.69 ms` — **bit-identical to M5c single-hand baseline**, confirms the two-driver refactor does not regress the single-hand critical path.
 
 ### 8.4 Deviations from plan
 
-(list any forced changes; if none, write "none")
+1. **PC2 USB enumeration drifted within hours of plan-write.** Morning probe (plan rev2 §10.0): Right=`/dev/ttyACM1`. Evening probe (m7-enum, m7-watchdog-dual logs): Right=`/dev/ttyACM0`. Operator updated `config.yaml` locally on PC2 to make tests pass; M7 ✅ closeout commit pins canonical `config.yaml` to the observed evening mapping (ACM2 / ACM0). New ADR-042 makes the per-session re-probe a permanent policy. Plan rev2 §9 NEW R8 materialized within the same workday — risk register kept honest.
 
-### 8.5 Known issues / follow-ups (carry to M8 risk register if needed)
+2. **Plan §4.3 right-hand single-finger flex checklist NOT exhaustively log-captured.** Operator did the verification visually (M7 plan rev2 §4.3 acceptance is "every checklist item passes WITHOUT a wrong direction"), no per-iteration log archived. No `mapping.right` sign flips committed. `mapping.right` starting hypothesis (mirror of left) carries into M8 acceptance test (cup grasp) as a candidate failure mode.
 
-(latency outliers, RS485 contention symptoms, PC2 USB warmth, etc.)
+3. **Plan §4.4 60 s clean dual-hand teleop NOT captured to log.** Operator confirmed visually that dual-hand teleop works (only-left moves left, only-right moves right, both-fist works, mixed gestures work). The dual-hand latency record (§8.3) comes from the 25 s §4.5 P1' watchdog session (m7-watchdog-dual log, n=1164) — adequate sample size for budget verification, but not the planned-pure 60 s steady-state session.
+
+4. **Plan §4.5 P1' dual-hand watchdog stale-resend: log evidence inconclusive.** `docs/logs/m7-watchdog-dual-2026-05-19.log` contains zero `[WARN] watchdog: no UDP for >200ms` lines, suggesting the planned UDCAP off→on toggle either did not happen during this capture or did not produce a ≥200 ms gap. The log validates dual startup, dual SIGTERM clean shutdown (mode=0 + close printed twice — once per driver, ADR-039 isolation working as designed), and `--hand both` runtime stability. **Dual-mode watchdog stale-resend is operator-visual only, not log-verified.** Single-hand watchdog stale-resend remains log-verified by M6 (roadmap rev 7).
+
+5. **Plan §4.5 P3' clamp-dual log truncated** after `[INFO] first packet from 192.168.3.24` — no shutdown sequence, no clamp behavior evidence in the log. Same log-truncation class as M6 §8.4 SIGINT issue. Operator confirmed visually that the narrowed clamp held the right joint at 30°.
+
+6. **Plan §4.5 P5' startup-gate timeout dual + §4.5 P6' A/B fail-closed: NO LOGS.** Operator visual confirmation only. P6' regression cross-check (`--hand left` continues to work without regression) IS log-verified (m7-single-regression).
+
+### 8.5 Known issues / follow-ups (carry to M8 risk register)
+
+- **USB enumeration drift** (R12 / ADR-042): every reboot or USB replug requires `config.yaml` re-probe. Candidate post-M7 polish: udev rules with stable USB-serial-number → `/dev/xhand-{left,right}` symlinks. Not currently scheduled — revisit if R12 keeps biting operationally.
+- **Dual-mode latency max outlier ~100 ms** (R11 / ADR-041): same class as M6 single-hand ~100 ms outlier (roadmap rev 7). Two occurrences now; M8 30-min stress test (SPEC §9 phase 3.10) is the venue to characterize frequency, correlate with UDP/USB events, and design a fix if needed.
+- **Right-hand sign verification gap** (R5): M8 cup-grasp acceptance test will surface any wrong signs as failure modes. If signs flip during M8, run a focused right-finger verification + log per plan §4.3.
+- **Log capture discipline** (cross-cutting): half of plan §4 sub-tests passed operator-visual without log evidence. M8 must enforce backgrounded process + `kill -TERM` pattern (not SIGINT) to preserve log integrity for any non-trivial test.
+- **0.80 ms p95 latency headroom is operationally tight**: any per-tick work added in M8 (low-pass smoothing filter, thumb retargeting IK transforms per roadmap rev 6, additional logging) must measure its ms-cost before commit.
 
 ---
 

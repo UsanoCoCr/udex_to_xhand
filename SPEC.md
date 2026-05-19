@@ -13,33 +13,41 @@
 ## 2. System Architecture
 
 ```
-┌──────────────────┐       UDP/JSON        ┌──────────────────────────────────────────┐
-│  Windows PC      │      port 9000        │  Linux host (Unitree G1 PC2, aarch64)    │
-│                  │ ───────────────────>   │  Single C++17 binary `udex_to_xhand`     │
-│  UDCAP Software  │   60/90/120 Hz        │  ┌─────────────┐    ┌─────────────────┐  │
-│  (HandDriver)    │   L+R hand data       │  │ UDP Receiver │───>│ Joint Mapper    │  │
-│                  │                       │  │  + JSON parse│    │ (24→12 per hand)│  │
-└──────────────────┘                       │  └─────────────┘    └────────┬────────┘  │
-                                           │                              │           │
-                                           │              ┌───────────────┴────────┐  │
-                                           │              │      XHand Driver      │  │
-                                           │              │ (xhand_control C++ SDK,│  │
-                                           │              │     RS485, aarch64)    │  │
-                                           │              └───┬───────────────┬────┘  │
-                                           │                  │               │       │
-                                           │            ┌─────┴──┐     ┌─────┴──┐    │
-                                           │            │ XHand  │     │ XHand  │    │
-                                           │            │ Left   │     │ Right  │    │
-                                           │            └────────┘     └────────┘    │
-                                           └──────────────────────────────────────────┘
+┌──────────────────┐       UDP/JSON        ┌──────────────────────────────────────────────┐
+│  Windows PC      │      port 9000        │  Linux host (Unitree G1 PC2, aarch64)        │
+│                  │ ───────────────────>   │  Single C++17 binary `udex_to_xhand`         │
+│  UDCAP Software  │   60/90/120 Hz        │  ┌─────────────┐    ┌─────────────────┐      │
+│  (HandDriver)    │   L+R hand data       │  │ UDP Receiver │───>│ Joint Mapper    │      │
+│                  │                       │  │  + JSON parse│    │ (24→12 per hand)│      │
+└──────────────────┘                       │  └─────────────┘    └────────┬────────┘      │
+                                           │                              │                │
+                                           │           ┌──────────────────┴──────────────┐ │
+                                           │           │   main loop (~100 Hz, RAII)    │ │
+                                           │           └─┬────────────────────────────┬──┘ │
+                                           │             │                            │    │
+                                           │     ┌───────┴────────┐         ┌─────────┴─┐ │
+                                           │     │ XHandDriver_L  │         │XHandDriver_R│ │
+                                           │     │ (XHandControl)│         │(XHandControl)│ │
+                                           │     └───────┬────────┘         └────────┬───┘ │
+                                           │             │ RS485                    │ RS485│
+                                           │     ┌───────┴────────┐         ┌────────┴───┐ │
+                                           │     │ /dev/ttyACM(L) │         │/dev/ttyACM(R)│ │
+                                           │     └───────┬────────┘         └────────┬───┘ │
+                                           │             │                          │      │
+                                           │      ┌──────┴───┐               ┌──────┴───┐  │
+                                           │      │ XHand L  │               │ XHand R  │  │
+                                           │      └──────────┘               └──────────┘  │
+                                           └──────────────────────────────────────────────┘
 ```
+
+M7 / ADR-039 finalized the topology: each XHand is on its **own** USB-to-RS485 path (one CDC-ACM endpoint per hand, NOT multi-drop). Two `XHandDriver` instances, two `XHandControl` instances, two `/dev/ttyACMx` device nodes. ADR-042 documents that those device-node numbers are session-local — re-probe after every reboot / USB replug.
 
 ### Communication Decisions
 
 | Link | Protocol | Rationale |
 |------|----------|-----------|
 | UDCAP → Linux | UDP JSON, port 9000 | Already working (test.py). Non-blocking, stateless. |
-| Linux → XHand | **RS485** (3Mbps, USB-to-serial) | Simpler setup than EtherCAT (no root/网卡 config). Bandwidth sufficient for dual-hand at 100Hz (~5Kbits/cycle vs 3Mbps available). Upgrade path to EtherCAT exists if needed. |
+| Linux → XHand | **RS485** (3Mbps, USB-to-serial), **two independent USB-CDC-ACM endpoints** (M7 / ADR-039) | Simpler setup than EtherCAT (no root/网卡 config). Hardware exposes one CDC-ACM per XHand (NOT multi-drop) — verified on PC2 2026-05-19. Latency cost: dual `send_command` per tick ≈ 2× single (M7 / ADR-041: avg/p95 ≈ 19 ms within 20 ms budget). Upgrade path to EtherCAT exists if needed. |
 
 ### Control Loop (target 100Hz)
 
@@ -322,14 +330,16 @@ udex_to_xhand/
 |---|------|-------------|--------|------------|
 | 1 | **Joint mapping inaccuracy** — 24→12 mapping produces unnatural motions, especially for thumb | HIGH | HIGH | Make mapping fully configurable (config.yaml). Start with simple linear mapping, iterate with operator feedback. Budget significant tuning time. |
 | 2 | ~~UDCAP parameter ordering unknown~~ **RESOLVED** (M2; ADRs 009/010/011/012/013) — distal→proximal per finger; MCP Roll non-contiguous at l20–l22; l23 is gesture flag, not a joint | — | — | Retired |
-| 3 | **RS485 bus contention with dual hands** — Sending commands to two hands on shared bus may introduce latency or collisions | MEDIUM | MEDIUM | Monitor cycle time. If >10ms per cycle, switch to EtherCAT or use two separate USB-to-serial adapters. PC2 USB port budget is also a precondition (see Risk 8). |
+| 3 | ~~**RS485 bus contention with dual hands**~~ **CLOSED** (M7 / ADR-039) — hardware exposes two independent USB-CDC-ACM endpoints (one per XHand); there is no shared RS485 bus to contend on. Latency profile recorded in ADR-041 (avg/p95 ≈ 19 ms in dual mode, within 20 ms budget). | — | — | Retired. New residual: USB enumeration drift — see Risk 12. |
 | 4 | **UDP packet loss / jitter** — WiFi or congested network causes dropped frames or variable latency | MEDIUM | MEDIUM | Use wired Ethernet between Windows and Linux. Implement smoothing filter to interpolate over missing frames. |
-| 5 | **Sign convention mismatch** — UDCAP negative=flexion vs XHand positive=flexion may vary per axis and per hand | HIGH | MEDIUM | Configurable sign per joint in config.yaml. Left hand verified in M4; right hand verification in M7. |
+| 5 | **Sign convention mismatch** — UDCAP negative=flexion vs XHand positive=flexion may vary per axis and per hand | HIGH | MEDIUM | Configurable sign per joint in config.yaml. Left hand verified in M4. Right hand: M7 plan rev2 §4.3 single-finger flex was not exhaustively log-captured (operator visual only); `mapping.right` starting hypothesis (mirror of left) carries into M8 acceptance test as expected failure mode. |
 | 6 | **XHand PID tuning** — Default kp=100 may cause oscillation or sluggish response at teleoperation speeds | MEDIUM | LOW | Expose PID params in config. Start conservative (low kp), increase gradually. |
 | 7 | ~~**aarch64 `xhand_controller` wheel availability**~~ **RESOLVED via path change** (roadmap revision 2, 2026-05-16) — vendor delivers `xhand_control_sdk/` (aarch64 C++ SDK + headers + .so), not a Python wheel. Project pivots to a pure C++ runtime; no Python wheel needed. | — | — | Retired. New residual: C++ build correctness on PC2 — covered by M5a. |
 | 8 | **PC2 resource / lifecycle constraints** — onboard PC2 has unknown CPU/RAM/USB power budget; may be torn down by robot lifecycle (SIGTERM) | MEDIUM | MEDIUM | M5 profiles resource usage; M6 adds SIGTERM handler equivalent to Ctrl+C (C++ `std::signal` + RAII shutdown). |
 | 9 | **Windows → G1 PC2 network path** — new topology vs dev PC; requires static IP / firewall / wired link configuration | MEDIUM | LOW | M5 explicit task: configure and verify UDP path before re-running Phase 1 items on PC2. |
-| 10 | **C++ port regressions vs Python M4 baseline** — rewriting M1/M3/M4 in C++ can re-introduce sign/clamp/ordering bugs already fixed in ADRs 020-022 | MEDIUM | MEDIUM | M5b reuses verified `config.yaml` data unchanged; M5c re-runs M3 (fist/palm/V/OK) and M4 (single-hand teleop) acceptance scripts before declaring M5 done. |
+| 10 | **C++ port regressions vs Python M4 baseline** — rewriting M1/M3/M4 in C++ can re-introduce sign/clamp/ordering bugs already fixed in ADRs 020-022 | MEDIUM | MEDIUM | M5b reuses verified `config.yaml` data unchanged; M5c re-runs M3 (fist/palm/V/OK) and M4 (single-hand teleop) acceptance scripts before declaring M5 done. M7 closeout adds the m7-single-regression cross-check confirming `--hand left` latency is bit-identical to the M5c baseline (avg=9.59 / p95=9.63 / max=10.69 ms). |
+| 11 | **Dual-mode latency outlier ~100 ms** (M6 / M7) — both M6 single-hand long sessions and the M7 dual `--hand both` 25 s session produce occasional single-tick latency spikes ~100 ms while p95 stays at baseline | LOW | LOW | Documented in ADR-041; SPEC §9 phase 3.10 30-minute stress test in M8 is the venue to characterize frequency / cause / mitigation. |
+| 12 | **PC2 CDC-ACM enumeration is session-local** (M7) — `/dev/ttyACM{N}` minor numbers shift across reboot / USB replug / hub-power events; M7 morning probe (Right=ACM1) drifted to evening probe (Right=ACM0) within hours | HIGH | LOW | ADR-042: re-probe + update `config.yaml` per plan rev2 §10.2.3 before any session. Wrong port → `OPEN_DEVICE_FAILED` → exit 2 (loud). Long-term fix candidate: udev symlinks keyed on USB serial number (post-M7 polish, not currently scheduled). |
 
 ---
 
@@ -344,10 +354,12 @@ udcap:
 
 xhand:
   protocol: "RS485"        # or "EtherCAT"
-  serial_port: "/dev/ttyACM0"   # CDC-ACM device (ADR-014)
+  # M7 / ADR-039 + ADR-042: each XHand on its own CDC-ACM port (NOT
+  # multi-drop). Paths are PC2-session-local — re-probe after reboot /
+  # USB replug. Last observed (2026-05-19 evening): L=ACM2, R=ACM0.
+  left_serial_port:  "/dev/ttyACM2"
+  right_serial_port: "/dev/ttyACM0"
   baud_rate: 3000000
-  left_hand_id: 0
-  right_hand_id: 1
   control_mode: 3          # 0=passive, 3=position, 5=force
   default_kp: 100
   default_ki: 0
@@ -386,8 +398,8 @@ mapping:
 
 1. ~~**UDCAP l0-l23 exact mapping verification**~~ **RESOLVED** (M2; ADRs 009/010/011/012/013). §3.1 now reflects the verified mapping.
 2. **XHand per-joint angle limits** — The overall range is -90°~110° but individual joints likely have tighter limits. Need to query or measure.
-3. **Right hand sign convention** — UDCAP docs say "right hand may need sign negation". Need to test which axes. M7 scope.
-4. **RS485 dual-hand addressing** — Can two XHands share one serial port? Or do we need two USB adapters? Also constrained by PC2 USB port count (M7).
+3. **Right hand sign convention** — UDCAP docs say "right hand may need sign negation". M7 plan rev2 §4.3 single-finger flex was operator-visual only (no exhaustive log); `mapping.right` starts as a mirror of left and carries into M8 acceptance test as expected failure mode. Re-open if M8 surfaces specific joints needing flips.
+4. ~~**RS485 dual-hand addressing**~~ **RESOLVED** (M7 / ADR-039) — hardware exposes one CDC-ACM endpoint per XHand on PC2; each `XHandDriver` opens its own `/dev/ttyACMx`. Two-port split confirmed 2026-05-19. PC2 USB port count adequate (uses 2 of N CDC-ACM-capable headers).
 5. **Optimal PID parameters** — kp=100 may not be appropriate for teleoperation. Need to tune for responsiveness vs smoothness.
 6. **Smoothing filter** — May need a low-pass filter or interpolation to handle UDP jitter. Design TBD based on Phase 1 measurements.
 7. ~~**aarch64 `xhand_controller` wheel availability**~~ **RESOLVED** — vendor delivered `xhand_control_sdk/` C++ SDK with aarch64 `.so` + headers (2026-05-16). Project pivots to pure C++ runtime; no Python wheel needed.

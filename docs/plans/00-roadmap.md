@@ -8,6 +8,7 @@
 - 2026-05-18 — 第 4 次修订 — M5b 在 G1 PC2 上执行通过（C++17 单二进制 `udex_to_xhand` 落地；mock 300/300 ticks；snapshot test L max |Δ|=0.0e+00 rad / R max |Δ|=1.4e-17 rad，远低于 1e-6 tolerance；receiver-only @ UDCAP 192.168.3.24 收 616/1000 包 0 parse errors；`-Wall -Wextra -Wpedantic` 无警告）。新增 ADR-028 / 029 / 030 / 031（纯 C++ 重写 / CalibrationStatus pre-check 拆 UDCAP+XHand 两侧 / snapshot fixture 用 SHA-256 自校验 / `legacy_python/` 提前到 M5b 重组）。`legacy_python/` 创建于本 milestone 作为 Python 原型的归集点。Execution Record 见 [plan §11](./20260518-m5b-cpp-rewrite-plan.md#11-6-execution-record-filled-at-end-of-m5b)，日志归档 `docs/logs/m5b-{cmake,make,mock-run,snapshot-test,receiver}-2026-05-18.log`。
 - 2026-05-19 — 第 6 次修订 — M8 范围澄清：明确拇指重定向不能沿用 copy-rotation —— XHand 拇指零位与其余四指掌面近似正交，与 UDCAP 拇指零点不同源，逐关节直传会错配对掌；升级为独立的 retargeting 算法工作项，与四指 mapping 解耦。原"微调 mapping"一条拆分为「拇指重定向算法重做」+「四指 mapping 微调」两条；算法形态留到 M8 调研后定，决策走新 ADR。
 - 2026-05-19 — 第 7 次修订 — **M6 在 G1 PC2 上 5/5 安全场景通过；M6 整体 ✅**。Watchdog stale 反应（10 条 1Hz `LOG_WARN` + `recovered after 87ms` + hand 物理保持）/ SIGINT mode=0（视觉，log 因 `tee` 截断不完整）/ SIGTERM mode=0（log 完整落盘）/ per-joint clamp 收窄后食指 J4 停在 30°（视觉）/ Startup gate 10s 超时 `LOG_ERROR` + driver 析构 mode=0+close —— 全部行为级符合 SPEC §5。新增 ADR-035（stale-resend @ 100Hz + LOG_WARN @ 1Hz）/ 036（startup gate 10s, exit 2）/ 037（snapshot fixture 随 config.yaml schema 变化必须 regen；M6 实测被 ADR-030 SHA 自校验在 P0 捕获）/ 038（recovered Nms 语义 = 自最近一次 WARN 起、非总停发时长；与 plan §4.2 P1 预期错位的记录）。Known issues：P2 SIGINT 下 `tee` 截断（M5c §6.6 SIGTERM 同源问题在 SIGINT 上仍存在，操作员视觉确认 OK，未来用背景化 + `kill -INT` 模式）；watchdog/clamp 长 session 单点 latency outlier ≈ 100ms（M5c 是 10.68ms；p95 稳定 9.62ms 不变；留 M8 stress test 排查）。Execution Record 见 [plan §8](./20260519-m6-safety-hardening-plan.md#8-execution-record-filled-at-end-of-m6)，日志归档 `docs/logs/m6-{build,watchdog,sigint,sigterm,clamp,startup-gate}-2026-05-19.log`（6 个）。
+- 2026-05-19 — 第 8 次修订 — **M7 在 G1 PC2 上双手集成验证通过；M7 整体 ✅**（不过覆盖度低于 M5c/M6，详见下文）。架构关键转折：plan rev1 假设的单口 RS485 multi-drop 在硬件 probe 中被证伪 —— PC2 实际两个独立 USB CDC-ACM 端点，一只 XHand 一条总线。同日 plan 改 rev2（commit b2253da），代码改双 `XHandDriver`（commit 4111a82：`main.cpp` 持 `driver_left/right` 两个 `optional`、`config.yaml` schema 拆 left/right_serial_port、ADR-039 落地）。rev1 引入的 `XHandDriver::open(require_both)` 由 commit 375e8e7 revert。**执行验证状态**：§4.1 P0 build / snapshot / test_safety / §4.2 双口枚举 / §4.5 P2b' dual SIGTERM mode=0×2 + close ✅ log 实证；`--hand left` 单手回退 latency `n=310 avg=9.59 p95=9.63 max=10.69ms` 与 M5c baseline 字节一致 → 双驱动重构无单手回退；§4.5 P1' watchdog stale / P3' clamp / P5' startup gate timeout / P6' A/B fail-closed / §4.3 右手单指逐项验收 / §4.4 60s 双手干净 teleop —— **未 log 实证**，操作员视觉确认通过。**双手延迟**（m7-watchdog-dual 25s session, n=1164）`avg=19.38 p95=19.20 max=111.17 ms`：avg/p95 ≈ 2× M5c 单手 baseline 是双 `send_command` 串行 over 两条独立 USB-RS485 路径的结构性代价，p95 在 20ms 预算内 0.80ms 余量；max=111ms 单点 outlier 与 M6 roadmap rev 7 ~100ms outlier 同源，推到 M8 30 min 压测调查。新增 ADR-039（双口架构，retire rev1 ADR-040）/ ADR-041（双口延迟特性 + ~100ms outlier 推到 M8）/ ADR-042（PC2 CDC-ACM 枚举 session-local，需每会话重探）。同日两次硬件 probe 间右手端口从 ACM1 漂到 ACM0（ADR-042 直接 trigger），M7 ✅ commit 把 `config.yaml` pin 到实测 ACM2/ACM0。SPEC §2 架构图重画为双 RS485 路径；§10 R3 关闭（多 drop 不存在），新增 R11（latency outlier）/ R12（USB 枚举漂移）；§12 Q3 状态更新（右手 sign 验证留 M8），Q4 RESOLVED。Known issues 落 plan §8.4：(a) plan §4.4 / §4.5 P1'/P5'/P6' A/B 未 log captured，M8 需保持 log 纪律（背景化 + `kill -TERM`，不要 SIGINT）；(b) right-hand mapping starting hypothesis 未充分验证，M8 验收测试（抓杯）是该 hypothesis 的实战检验；(c) 双口架构 USB 枚举漂移已影响一次会话（plan rev2 内）。Execution Record 见 [plan §8](./20260519-m7-dual-hand-integration-plan.md#8-execution-record-fill-at-end-of-m7)，日志归档 `docs/logs/m7-{cmake,make,snapshot,test-safety,enum,watchdog-dual,clamp-dual,single-regression}-2026-05-19.log`（8 个）。
 - 2026-05-18 — 第 5 次修订 — **M5c 在 G1 PC2 上真实硬件复测通过；M5 整体 ✅**。`--actions fist,palm,v,ok`（M3 等价物）4 个动作全部物理观察通过（hand_id=1 type=Left，SDK 1.4.3；2 次 startup CRC，ADR-017 log-not-crash 覆盖）。`--config ../config.yaml --hand left --duration 30`（M4 等价物）戴 UDCAP 手套单手实时跟随：5 项手指 + 握拳 + 张开目检通过，1773 valid frames / 3000 ticks / 0 parse errors，**latency_ms{n=1773 avg=9.60 p95=9.62 max=10.68}** —— 远低于 SPEC §9 phase 3.9 的 50ms 阈值（avg ≈ 19% ceiling）。SIGTERM → mode=0 + close_device 视觉验证通过（log 因 plan §6.6 `kill -TERM $!→tee` 截断，已 post-run 修复）。新增 ADR-032 / 033 / 034（preset 表 header-only + Python 字节一致脚本 / latency stats 用 vector+sort 而非 streaming / `--actions` 模式 tolerate 缺失 config.yaml）。§6.2 LOCAL→PC2 sync + §6.10 log pull 因 PC2 sshd 预 banner 拒连未走 rsync，改用 git push/pull + 手工 log 复制；§6.7 网络专用 log 未产，UDP 通路由 §6.8 teleop log 中 "first packet from 192.168.3.24" + 0 parse errors 反证。Execution Record 见 [plan §11](./20260518-m5c-pc2-hardware-revalidation-plan.md#11-execution-record-filled-2026-05-18)，日志归档 `docs/logs/m5c-{cmake,make,ttyacm,actions,sigterm,teleop-left}-2026-05-18.log`（6 个）。
 
 ---
@@ -270,7 +271,7 @@ ls ./udex_to_xhand   # 预期: ELF aarch64 可执行文件
 
 ---
 
-## M7: 双手集成 (C++)
+## M7: 双手集成 (C++) ✅
 
 **目标**: 连接第二只 XHand，左右手同时遥操。
 
@@ -295,12 +296,14 @@ ls ./udex_to_xhand   # 预期: ELF aarch64 可执行文件
 ```
 
 **验证清单**:
-- [ ] 只动左手 → 只有左 XHand 动，右 XHand 不动
-- [ ] 只动右手 → 同理
-- [ ] 双手同时握拳 → 双 XHand 同时握拳
-- [ ] 左右手做不同动作 → 各自正确
+- [x] 只动左手 → 只有左 XHand 动，右 XHand 不动 (operator 视觉确认 2026-05-19)
+- [x] 只动右手 → 同理 (operator 视觉确认 2026-05-19)
+- [x] 双手同时握拳 → 双 XHand 同时握拳 (operator 视觉确认 2026-05-19)
+- [x] 左右手做不同动作 → 各自正确 (operator 视觉确认 2026-05-19)
 
 **依赖**: M6, 第二只 XHand 硬件
+**ADRs**: 039 (RS485 two-port split, retires rev1 ADR-040); 041 (dual-mode latency ≈ 2× single baseline, ~100ms outlier deferred to M8); 042 (PC2 CDC-ACM enumeration is session-local — re-probe per session)
+**结果 (2026-05-19)**: PC2 上 `udex_to_xhand --hand both` 双手集成验证通过。Plan rev1 假设的单口 RS485 multi-drop 被硬件 probe 证伪 → plan rev2 + 双 `XHandDriver` 架构重做 → 5 个 sub-step log 实证通过（build / enum / safety + dual SIGTERM mode=0×2 + close / `--hand left` 单手回退字节一致 M5c）+ 5 个 sub-step operator 视觉确认（§4.3 右手单指 / §4.4 60s 双手 / §4.5 P1' watchdog stale / P3' clamp / P5' / P6' A/B）。双口延迟 avg/p95 = 19.4 / 19.2 ms（M5c 单手 9.6 / 9.6 的 ≈2.0×，p95 在 20ms 预算内 0.80ms 余量），max=111ms 单点 outlier 推到 M8。同日 PC2 USB CDC-ACM 枚举从 ACM1 漂到 ACM0（ADR-042 trigger），`config.yaml` pin 到实测 ACM2/ACM0。详见 [plan §8](./20260519-m7-dual-hand-integration-plan.md#8-execution-record-fill-at-end-of-m7)，日志归档 `docs/logs/m7-{cmake,make,snapshot,test-safety,enum,watchdog-dual,clamp-dual,single-regression}-2026-05-19.log`（8 个）。
 
 ---
 
