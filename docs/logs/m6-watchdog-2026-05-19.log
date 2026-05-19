@@ -1,0 +1,26 @@
+[INFO] config loaded: ../config.yaml
+[INFO] mode: FULL (UDP + XHand)
+[INFO] UDP bound 0.0.0.0:9000
+try open device times: 1 / 3 
+Start reading data from serial port
+[INFO] XHand SDK version: 1.4.3
+[INFO] Serial: /dev/ttyACM0 @ 3000000 baud
+[INFO] hand_id=1 type=Left
+[INFO] waiting for first calibrated UDP frame (timeout=10s)...
+[INFO] first packet from 192.168.3.24
+[WARN] watchdog: no UDP for >200ms, holding last position
+[WARN] watchdog: no UDP for >200ms, holding last position
+[WARN] watchdog: no UDP for >200ms, holding last position
+[WARN] watchdog: no UDP for >200ms, holding last position
+[WARN] watchdog: no UDP for >200ms, holding last position
+[WARN] watchdog: no UDP for >200ms, holding last position
+[WARN] watchdog: no UDP for >200ms, holding last position
+[WARN] watchdog: no UDP for >200ms, holding last position
+[WARN] watchdog: no UDP for >200ms, holding last position
+[WARN] watchdog: no UDP for >200ms, holding last position
+[INFO] watchdog: recovered after 87.2445ms
+[INFO] Shutdown: mode=0 (passive)
+serial close
+[INFO] Device closed
+[INFO] latency_ms{n=649 min=9.53789 avg=9.8799 p50=9.57008 p95=9.62544 max=100.658}
+[INFO] exited after 21.0s, 2000 ticks, 649 valid frames, 0 parse errors

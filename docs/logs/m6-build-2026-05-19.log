@@ -1,0 +1,39 @@
+-- The CXX compiler identification is GNU 11.4.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found CURL: /usr/lib/aarch64-linux-gnu/libcurl.so (found version "7.81.0")  
+-- Found nlohmann_json: /usr/lib/cmake/nlohmann_json/nlohmann_jsonConfig.cmake (found suitable version "3.10.5", minimum required is "3") 
+-- Found OpenSSL: /usr/lib/aarch64-linux-gnu/libcrypto.so (found version "3.0.2")  
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/unitree/udex_to_xhand/build
+[ 21%] Building CXX object CMakeFiles/test_safety.dir/src/safety.cpp.o
+[ 28%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/main.cpp.o
+[ 28%] Building CXX object CMakeFiles/test_safety.dir/tests/test_safety.cpp.o
+[ 28%] Building CXX object CMakeFiles/test_mapper_snapshot.dir/tests/test_mapper_snapshot.cpp.o
+[ 35%] Building CXX object CMakeFiles/test_mapper_snapshot.dir/src/joint_mapper.cpp.o
+[ 42%] Linking CXX executable test_safety
+[ 42%] Built target test_safety
+[ 50%] Building CXX object CMakeFiles/test_mapper_snapshot.dir/src/udcap_receiver.cpp.o
+[ 57%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/cli.cpp.o
+[ 64%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/udcap_receiver.cpp.o
+[ 71%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/joint_mapper.cpp.o
+[ 78%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/xhand_driver.cpp.o
+[ 85%] Linking CXX executable test_mapper_snapshot
+[ 85%] Built target test_mapper_snapshot
+[ 92%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/safety.cpp.o
+[100%] Linking CXX executable udex_to_xhand
+[100%] Built target udex_to_xhand
+[test_safety] PASS (failures=0)
+[ERROR] config.yaml SHA-256 mismatch
+[ERROR]   fixture: 7ca216eb85866ac0132d2801b097aa20c7e8dfce64df21b9ff4efc677e22dbfa
+[ERROR]   actual : 63e4ae821f11d9219db08216d91b0f7257f3127b14e0c717dfbcf6225cc47979
+[ERROR]   → regenerate via scripts/dump_mapper_baseline.py
+[INFO] fixture SHA-256 match: example.json + config.yaml unchanged
+[INFO] running JointMapper on example.json
+[INFO] L joints max |Δ| = 0.0e+00 rad  (tol 1.0e-06) → PASS
+[INFO] R joints max |Δ| = 1.4e-17 rad  (tol 1.0e-06) → PASS
+[INFO] all 24 joints within tolerance
