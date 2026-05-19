@@ -1,9 +1,9 @@
 {
   "source": {
     "example_json_sha256": "48a0adbc4e686b2d9206ab0ede6bbc9da975540a90da9dfa8cbc600f18bfe939",
-    "config_yaml_sha256": "43537799a53112f581f85f04ac4c22964f49c69d736f9447016e770f8e688c96",
+    "config_yaml_sha256": "f68f96714fbb9ce31001e678481cc6ed84953199e32abe66db9425819fe2417e",
     "python_version": "3.13.7",
-    "generated_at": "2026-05-19T10:01:10+00:00",
+    "generated_at": "2026-05-19T14:39:30+00:00",
     "joint_order": [
       "thumb_bend",
       "thumb_rota1",
