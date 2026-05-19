@@ -18,7 +18,7 @@ XHandDriver::~XHandDriver() {
     }
 }
 
-void XHandDriver::open(bool require_both) {
+void XHandDriver::open() {
     auto err = ctl_.open_serial(port_, static_cast<uint32_t>(baud_));
     if (!err) {
         throw std::runtime_error("open_serial(" + port_ + ", " + std::to_string(baud_) +
@@ -54,17 +54,6 @@ void XHandDriver::open(bool require_both) {
         } else {
             LOG_WARN("hand_id=" << static_cast<int>(id) << " unrecognized type='" << htype << "'");
         }
-    }
-
-    // M7 / ADR-040: fail-closed when caller required both hands but only one
-    // (or neither) was discovered. Pre-M7 callers (--hand left|right, --actions)
-    // pass require_both=false and keep their tolerant behavior.
-    if (require_both && !(hand_id_left_ && hand_id_right_)) {
-        std::string missing;
-        if (!hand_id_left_)  missing += "Left ";
-        if (!hand_id_right_) missing += "Right";
-        throw std::runtime_error(
-            "open(require_both=true): missing hand(s) on bus: " + missing);
     }
 }
 

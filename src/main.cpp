@@ -323,10 +323,7 @@ int main(int argc, char** argv) {
     if (!args.mock && !args.receiver_only) {
         try {
             driver.emplace(xhand_cfg.serial_port, xhand_cfg.baud_rate, xhand_cfg.pid);
-            // M7 / ADR-040: --hand both fails closed if either Left or Right was
-            // not discovered on the bus (vs. the M5c-era tolerant default, which
-            // lets the first send_* call throw mid-loop).
-            driver->open(/*require_both=*/args.hand == cli::HandSelect::Both);
+            driver->open();
         } catch (const std::exception& e) {
             LOG_ERROR("XHandDriver: " << e.what());
             return 2;
