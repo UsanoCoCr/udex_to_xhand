@@ -7,6 +7,7 @@
 - 2026-05-18 — 第 3 次修订 — M5a 在 G1 PC2 上执行通过（左手，joint 4 ±0.1 rad，SDK 1.4.3，hand_id=1，serial 012L320220250728005）。新增 ADR-024 / 025 / 026 / 027 记录 M5a 非显然决定（vendor 示例作 bring-up harness / 厂商源不入库 / 沿用厂商 PID kp=225 / joint 4 作 smoke joint）。Execution Record 见 [plan §6](./20260516-m5a-vendor-sdk-pc2-bringup-plan.md#6-execution-record--filled-2026-05-18)，日志归档 `docs/logs/m5a-test-serial-2026-05-18.log`。
 - 2026-05-18 — 第 4 次修订 — M5b 在 G1 PC2 上执行通过（C++17 单二进制 `udex_to_xhand` 落地；mock 300/300 ticks；snapshot test L max |Δ|=0.0e+00 rad / R max |Δ|=1.4e-17 rad，远低于 1e-6 tolerance；receiver-only @ UDCAP 192.168.3.24 收 616/1000 包 0 parse errors；`-Wall -Wextra -Wpedantic` 无警告）。新增 ADR-028 / 029 / 030 / 031（纯 C++ 重写 / CalibrationStatus pre-check 拆 UDCAP+XHand 两侧 / snapshot fixture 用 SHA-256 自校验 / `legacy_python/` 提前到 M5b 重组）。`legacy_python/` 创建于本 milestone 作为 Python 原型的归集点。Execution Record 见 [plan §11](./20260518-m5b-cpp-rewrite-plan.md#11-6-execution-record-filled-at-end-of-m5b)，日志归档 `docs/logs/m5b-{cmake,make,mock-run,snapshot-test,receiver}-2026-05-18.log`。
 - 2026-05-19 — 第 6 次修订 — M8 范围澄清：明确拇指重定向不能沿用 copy-rotation —— XHand 拇指零位与其余四指掌面近似正交，与 UDCAP 拇指零点不同源，逐关节直传会错配对掌；升级为独立的 retargeting 算法工作项，与四指 mapping 解耦。原"微调 mapping"一条拆分为「拇指重定向算法重做」+「四指 mapping 微调」两条；算法形态留到 M8 调研后定，决策走新 ADR。
+- 2026-05-19 — 第 7 次修订 — **M6 在 G1 PC2 上 5/5 安全场景通过；M6 整体 ✅**。Watchdog stale 反应（10 条 1Hz `LOG_WARN` + `recovered after 87ms` + hand 物理保持）/ SIGINT mode=0（视觉，log 因 `tee` 截断不完整）/ SIGTERM mode=0（log 完整落盘）/ per-joint clamp 收窄后食指 J4 停在 30°（视觉）/ Startup gate 10s 超时 `LOG_ERROR` + driver 析构 mode=0+close —— 全部行为级符合 SPEC §5。新增 ADR-035（stale-resend @ 100Hz + LOG_WARN @ 1Hz）/ 036（startup gate 10s, exit 2）/ 037（snapshot fixture 随 config.yaml schema 变化必须 regen；M6 实测被 ADR-030 SHA 自校验在 P0 捕获）/ 038（recovered Nms 语义 = 自最近一次 WARN 起、非总停发时长；与 plan §4.2 P1 预期错位的记录）。Known issues：P2 SIGINT 下 `tee` 截断（M5c §6.6 SIGTERM 同源问题在 SIGINT 上仍存在，操作员视觉确认 OK，未来用背景化 + `kill -INT` 模式）；watchdog/clamp 长 session 单点 latency outlier ≈ 100ms（M5c 是 10.68ms；p95 稳定 9.62ms 不变；留 M8 stress test 排查）。Execution Record 见 [plan §8](./20260519-m6-safety-hardening-plan.md#8-execution-record-filled-at-end-of-m6)，日志归档 `docs/logs/m6-{build,watchdog,sigint,sigterm,clamp,startup-gate}-2026-05-19.log`（6 个）。
 - 2026-05-18 — 第 5 次修订 — **M5c 在 G1 PC2 上真实硬件复测通过；M5 整体 ✅**。`--actions fist,palm,v,ok`（M3 等价物）4 个动作全部物理观察通过（hand_id=1 type=Left，SDK 1.4.3；2 次 startup CRC，ADR-017 log-not-crash 覆盖）。`--config ../config.yaml --hand left --duration 30`（M4 等价物）戴 UDCAP 手套单手实时跟随：5 项手指 + 握拳 + 张开目检通过，1773 valid frames / 3000 ticks / 0 parse errors，**latency_ms{n=1773 avg=9.60 p95=9.62 max=10.68}** —— 远低于 SPEC §9 phase 3.9 的 50ms 阈值（avg ≈ 19% ceiling）。SIGTERM → mode=0 + close_device 视觉验证通过（log 因 plan §6.6 `kill -TERM $!→tee` 截断，已 post-run 修复）。新增 ADR-032 / 033 / 034（preset 表 header-only + Python 字节一致脚本 / latency stats 用 vector+sort 而非 streaming / `--actions` 模式 tolerate 缺失 config.yaml）。§6.2 LOCAL→PC2 sync + §6.10 log pull 因 PC2 sshd 预 banner 拒连未走 rsync，改用 git push/pull + 手工 log 复制；§6.7 网络专用 log 未产，UDP 通路由 §6.8 teleop log 中 "first packet from 192.168.3.24" + 0 parse errors 反证。Execution Record 见 [plan §11](./20260518-m5c-pc2-hardware-revalidation-plan.md#11-execution-record-filled-2026-05-18)，日志归档 `docs/logs/m5c-{cmake,make,ttyacm,actions,sigterm,teleop-left}-2026-05-18.log`（6 个）。
 
 ---
@@ -229,7 +230,7 @@ ls ./udex_to_xhand   # 预期: ELF aarch64 可执行文件
 
 ---
 
-## M6: Safety Layer (C++)
+## M6: Safety Layer (C++) ✅
 
 **目标**: 在 M5b 的 C++ 二进制基础上，把 M5b 里只是占位的安全模块强化到可无人值守运行。所有安全逻辑都在 `src/safety.{hpp,cpp}` 实现。
 
@@ -264,6 +265,8 @@ ls ./udex_to_xhand   # 预期: ELF aarch64 可执行文件
 ```
 
 **依赖**: M5 (C++ 二进制在 PC2 上跑通)
+**ADRs**: 035 (watchdog stale-resend @ 100Hz + LOG_WARN @ 1Hz); 036 (startup gate timeout 10s, exit 2); 037 (snapshot fixture regen on any config.yaml schema change); 038 ("watchdog: recovered after Nms" = time since last WARN, not total outage duration)
+**结果 (2026-05-19)**: PC2 上 5/5 安全场景行为级通过 — (P1) Watchdog 关闭 UDCAP ~10s 期间出 10 条 stale `LOG_WARN`（1Hz 限速精确）+ 重开后一行 `recovered after 87.2445ms` + hand 物理保持最后姿态；(P2) Ctrl+C 视觉确认 mode=0；(P2b) `kill -TERM` log 完整落盘 `mode=0 (passive) → serial close → Device closed → latency_ms{n=309 ... max=10.6325}`；(P3) `config.yaml` 收窄 index_joint1.clamp 到 [0,30] 后操作员视觉确认食指 J4 物理停在 30°；(P5) UDCAP 不发包时 binary 在 ~10s 后干净退出 `[ERROR] startup gate: no calibrated UDP frame in 10s; aborting` + 析构走 mode=0+close。新增 ADR-035 / 036 / 037 / 038（前两个 plan §7 预登记；037 因 M6 加 `startup_timeout_s` 触发 fixture SHA mismatch 由 ADR-030 检出，必须随 config.yaml schema 变化 regen；038 因 plan §4.2 P1 expected N 与代码实际语义错位补记）。详见 [plan §8](./20260519-m6-safety-hardening-plan.md#8-execution-record-filled-at-end-of-m6)，日志归档 `docs/logs/m6-{build,watchdog,sigint,sigterm,clamp,startup-gate}-2026-05-19.log`（6 个）。Known issues 落 plan §8.4 / §8.5：P2 SIGINT 因 Ctrl+C 直发 foreground process group 导致 `tee` 截断（log 在第一条 startup CRC WARN 后断开，操作员视觉确认通过，建议未来沿 P2b 背景化 + `kill -INT` 模式）；watchdog / clamp 长 session 出现单点 latency ≈ 100ms outlier（p95 仍稳定 9.62ms，留 M8 stress test 排查）。
 
 ---
 

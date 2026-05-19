@@ -703,30 +703,46 @@ git push
 > 跑完 §4 + §5 后回填本节，沿用 M5c §11 风格。先留 placeholder，PR 不带数据不合并。
 
 ### 8.1 Environment
-- PC2 hostname / kernel / SDK 版本 / `git rev-parse HEAD`：__TBD__
-- LOCAL hostname / cmake / clang or gcc 版本：__TBD__
+
+- PC2: G1 PC2 (aarch64 Ubuntu)；XHand SDK 1.4.3；hand_id=1 type=Left（与 M5c 一致）；`/dev/ttyACM0` @ 3000000 baud；UDCAP @ 192.168.3.24 over UDP 9000. SDK / serial / hand discovery 信息见每个 m6-* log 的第 4–8 行（`try open device times: 1 / 3` → `Start reading data from serial port` → `XHand SDK version: 1.4.3` → `Serial: /dev/ttyACM0 @ 3000000 baud` → `hand_id=1 type=Left`）。
+- LOCAL: darwin/arm64 (Apple Silicon), 仅用于 fixture 重生（`scripts/dump_mapper_baseline.py`）与 git；udex_to_xhand build 全部在 PC2 上做，详 §8.2。
 
 ### 8.2 LOCAL results
-- `cmake .. -DBUILD_TESTS=ON`：__pass/fail__ + 警告条目（应为 0）
-- `./test_safety`：__pass/fail__ + 失败用例（应为空）
-- `./test_mapper_snapshot`：__pass/fail__（M5b 已通过；本次为回归确认）
+
+- L1 build: 不在 LOCAL 单独跑，统一并入 P0（PC2 上 `-DBUILD_TESTS=ON` 一并产 `test_safety` + `test_mapper_snapshot`）；plan §4.1 的 LOCAL-build 路径作为兜底备用，**本次不需要**。
+- L2 静态自查：5 项 grep 全 hit（见实现期间会话记录）；本次未单独入 log，可随时复跑。
+- LOCAL fixture regen（M6 闭环新增步骤，未在 plan §4.1 显式登记）：`python3 scripts/dump_mapper_baseline.py --example example.json --config config.yaml --out tests/fixtures/mapper_baseline.json` → 仅 `config_yaml_sha256` 与 `generated_at` 字段更新（24 个关节值位级一致；`git diff` 已确认）。详 §8.4 deviation #2。
 
 ### 8.3 PC2 results — 逐场景
 
-| Test | exit | log path                                  | 关键摘要（latency / WARN 次数 / 物理观测）         |
-| ---- | ---- | ----------------------------------------- | -------------------------------------------------- |
-| P0   | __  | `docs/logs/m6-build-2026-05-19.log`       | 无警告 / unit PASS                                 |
-| P1   | __  | `docs/logs/m6-watchdog-2026-05-19.log`    | stale 期间 WARN 次数 = __；recovered Nms = __     |
-| P2   | __  | `docs/logs/m6-sigint-2026-05-19.log`      | latency avg/p95 = __；mode=0 行 = __              |
-| P2b  | __  | `docs/logs/m6-sigterm-2026-05-19.log`     | 同上；log 完整无 tee 截断                          |
-| P3   | __  | `docs/logs/m6-clamp-2026-05-19.log`       | 食指 J4 物理停在 __° （目测）                      |
-| P5   | __  | `docs/logs/m6-startup-gate-2026-05-19.log`| time real = __s；exit = 2                          |
+| Test | exit | log path                                  | 关键摘要（latency / WARN 次数 / 物理观测）                                                                                                            |
+| ---- | ---- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0   | mixed | `docs/logs/m6-build-2026-05-19.log`       | cmake / make / `test_safety` PASS；`test_mapper_snapshot` 首跑 ERROR (config.yaml SHA mismatch — `7ca216eb…` vs `63e4ae82…`)，本地 regen + 重跑 PASS（max \|Δ\| L=0 / R=1.4e-17 rad）。详 §8.4 deviation #2。 |
+| P1   | 0 (--duration 20)  | `docs/logs/m6-watchdog-2026-05-19.log`    | 10 条 `[WARN] watchdog: no UDP for >200ms, holding last position`（1Hz 限速精确，约 10s stale window）；recovered=87.2445ms（**注意：N = 自最近一次 WARN 起，非总停发时长**，ADR-038）；`latency_ms{n=649 min=9.54 avg=9.88 p50=9.57 p95=9.63 max=100.658}`；0 parse errors；操作员物理确认 hand 期间不松弛、不漂移。 |
+| P2   | n/a  | `docs/logs/m6-sigint-2026-05-19.log`      | log **不完整**（11 行，止于 `[WARN] send_command(hand_id=1): 1501070 Communication data CRC error`，无 `Shutdown` / `Device closed`）。操作员视觉确认 mode=0 触发、手指松弛、binary 正常退出。详 §8.4 deviation #3。 |
+| P2b  | 0    | `docs/logs/m6-sigterm-2026-05-19.log`     | log 完整：`Shutdown: mode=0 (passive) → serial close → Device closed`；`latency_ms{n=309 min=9.53 avg=9.58 p50=9.57 p95=9.61 max=10.6325}`（**唯一 max 不出 100ms outlier 的会话**）；`exited after 6.0s, 499 ticks, 309 valid frames, 0 parse errors`。`> file 2>&1 &` + `wait` 模式（plan §4.2 P2b）按预期工作，未出现 M5c §6.6 类型的截断。 |
+| P3   | 0 (--duration 15)  | `docs/logs/m6-clamp-2026-05-19.log`       | 操作员视觉确认左 XHand 食指 J4 物理停在约 30°（config.yaml left.index_joint1.clamp 临时改 `[0,30]`）；其余手指跟随正常；`latency_ms{n=852 min=9.54 avg=9.71 p50=9.57 p95=9.62 max=100.472}`；0 parse errors；`exited after 16.0s`。config.yaml 跑完已恢复。 |
+| P5   | 2 (per code path)   | `docs/logs/m6-startup-gate-2026-05-19.log`| `[INFO] waiting for first calibrated UDP frame (timeout=10s)...` → 10s 后 `[ERROR] startup gate: no calibrated UDP frame in 10s; aborting` → driver 析构走 `Shutdown: mode=0 (passive) → serial close → Device closed`（即使没进主循环，硬件出场状态与正常 shutdown 等价 — ADR-036 设计点）。 |
 
 ### 8.4 Deviations from plan
-- **2026-05-19, snapshot test invocation typo (plan-side, fixed in follow-up commit)** — initial commit of this plan called `./test_mapper_snapshot` with no CLI args in 4 places (§4.1 L1, §4.2 P0, §5.1, §5.2 P0), which fails immediately with `required: --fixture <path> --example <path> --config <path>`. M5c commit `19b0205` had fixed the same typo in the M5c plan; the M6 plan regressed it. Operator hit this on PC2 during P0; plan corrected to the canonical 3-arg form `./test_mapper_snapshot --fixture ../tests/fixtures/mapper_baseline.json --example ../example.json --config ../config.yaml`. No code change. **Lesson for M7/M8 plans:** treat the M5b/M5c canonical `./test_mapper_snapshot` invocation as a copy-paste-only block; do not abbreviate.
+
+- **2026-05-19, snapshot test invocation typo (plan-side, fixed in follow-up commit `1f0588f`)** — initial commit of this plan called `./test_mapper_snapshot` with no CLI args in 4 places (§4.1 L1, §4.2 P0, §5.1, §5.2 P0), which fails immediately with `required: --fixture <path> --example <path> --config <path>`. M5c commit `19b0205` had fixed the same typo in the M5c plan; the M6 plan regressed it. Operator hit this on PC2 during P0; plan corrected to the canonical 3-arg form `./test_mapper_snapshot --fixture ../tests/fixtures/mapper_baseline.json --example ../example.json --config ../config.yaml`. No code change. **Lesson for M7/M8 plans:** treat the M5b/M5c canonical `./test_mapper_snapshot` invocation as a copy-paste-only block; do not abbreviate.
+- **2026-05-19, snapshot fixture SHA drift caught at P0** — M6 added `startup_timeout_s: 10` to `config.yaml`'s `udcap:` section per §1.2(c). The single-line edit changed `config.yaml`'s SHA-256 from `7ca216eb…` to `63e4ae82…` while leaving every mapper-relevant field intact. ADR-030's SHA self-check then fired in `test_mapper_snapshot` (the test's intended behavior — caught silent drift). Resolution: regenerated `tests/fixtures/mapper_baseline.json` via `scripts/dump_mapper_baseline.py` on LOCAL Mac; only `config_yaml_sha256` + `generated_at` fields changed; 24 joint values are byte-identical (verified by `git diff`). The plan failed to budget this regen step; codified going forward in **ADR-037**.
+- **2026-05-19, SIGINT (P2) `tee` truncation, log incomplete** — running `./udex_to_xhand ... 2>&1 | tee log` in the foreground means Ctrl+C delivers SIGINT to the entire foreground process group, including `tee`. `tee` dies before the binary's `Shutdown: mode=0 (passive)` line writes; the broken pipe also nullifies subsequent stderr writes. M5c §6.6 hit the same shape on SIGTERM and fixed it for P2b in this plan; SIGINT was overlooked because Ctrl+C is intrinsically terminal-driven. Operator verified mode=0 visually + by physical hand-limp. **Lesson for M7/M8:** for any signal verification, use the P2b pattern (`> file 2>&1 &` then `kill -<SIG> $PID`) — Ctrl+C cannot be cleanly captured through a foreground `tee` pipe.
+- **2026-05-19, latency single-point outlier ≈ 100ms in long FULL-mode sessions** — M5c baseline was `max=10.68ms` over n=1773 (32s session). M6 watchdog log shows `max=100.658ms` (n=649, 21s) and clamp log shows `max=100.472ms` (n=852, 16s); the SIGTERM 6s short session (n=309) does **not** show the outlier (`max=10.6325ms`). `p95` is stable at 9.62ms across all three, so it's a single-sample tail event, not a distribution shift. Plausible sources (not investigated): primed_frame recv_ts vs delayed loop entry, occasional `tee` IPC stall under elevated stderr volume, or stale-recovery moment scheduling. **Not a safety regression** (no clamp / send / shutdown anomaly observed); deferred to M8 stress test for proper histogram analysis.
 
 ### 8.5 Follow-ups / 新 ADR / 风险登记更新
-- __（如有）__
+
+- **New ADRs** (M6 closeout): ADR-035 (watchdog stale-resend + 1Hz WARN, plan §7 pre-registered), ADR-036 (startup gate timeout 10s, plan §7 pre-registered), **ADR-037** (snapshot fixture regen is mandatory on any `config.yaml`/`example.json` change — promoted from §8.4 deviation #2), **ADR-038** ("watchdog: recovered after Nms" semantic — promoted from §8.4 deviation in P1 reading; `tick_start - last_warn_ts`, so N ∈ [0, 1000ms] by ADR-035's 1Hz cadence, **not** total outage duration).
+- **M7 plan checklist must include**: (a) regen + commit `tests/fixtures/mapper_baseline.json` if `config.yaml` gains any new right-hand sign / clamp / PID field (ADR-037 enforcement); (b) all signal verifications use the P2b background+kill pattern, never foreground+tee+Ctrl+C (§8.4 deviation #3 lesson); (c) treat `./test_mapper_snapshot` invocation as a copy-paste block (§8.4 deviation #1 lesson).
+- **M8 stress test scope addition**: investigate the latency outlier ≈ 100ms (§8.4 deviation #4). 30-min continuous run with full latency histogram (not just min/avg/p50/p95/max) will tell whether the outlier is a transient (startup-priming, recovery moment) or a recurring stall. If recurring, ADR-033 streaming-vs-sorted may need to revisit.
+- **Risk register** (plan §9):
+  - **R1** (SDK CRC accumulation during stale): Observed 0 SDK errors in the 10s P1 stale window (`[INFO] exited after 21.0s, 2000 ticks, 649 valid frames, 0 parse errors`). Stale resend at 100Hz over 10s = ~1000 send_command calls with 0 CRC. R1 effectively dismissed; ADR-017 path didn't trigger except for the canonical startup CRC observed in P2/P5 logs.
+  - **R2** (`std::signal` vs vendor SDK reentrancy): SIGTERM (P2b) emits complete `mode=0 → serial close → Device closed` sequence with all three lines flushed before exit. R2 dismissed for the SIGTERM path; SIGINT could not be fully verified by log due to deviation #3 but operator visual + analogous design path supports R2 dismissed there too.
+  - **R3** (seconds-vs-milliseconds unit mismatch): P5 wall-clock = ~10s (per the gate's deadline math); ADR-036's `std::chrono::seconds(udcap_cfg.startup_timeout_s)` correctly typed. R3 dismissed.
+  - **R4** (sed in P3): Operator used manual editor (per plan §4.2 note); sed not invoked. R4 dismissed by the conservative path.
+  - **R5** (UDCAP first frame after re-enable may be calib != 3): No evidence in log; recovery sequence emitted in one tick. R5 dismissed for the 10s outage scale; reopens if M8 stress test sees long calib-recovery tails.
+  - **R6** (plan author ≠ operator command lint): **Caught two real issues** — §8.4 deviation #1 (snapshot invocation typo) and #2 (fixture regen step missing from plan). Both resolved before declaring M6 done. Justifies retaining R6 in future plans.
 
 ---
 

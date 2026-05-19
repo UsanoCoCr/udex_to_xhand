@@ -194,9 +194,9 @@ Per UDCAP docs, the coordinate system is left-hand based. For right hand (`r0`-`
 
 | Mechanism | Implementation |
 |-----------|----------------|
-| **Watchdog timeout** | If no valid UDP packet received for >200ms, hold last commanded position. Log warning. |
+| **Watchdog timeout** | If no valid UDP packet received for >200ms (`udcap.timeout_ms`), hold last commanded position. **Stale reaction** (M6 / ADR-035) = resend last commanded rad @ 100Hz; `LOG_WARN` rate-limited @ 1Hz; on next fresh frame emit one `LOG_INFO "watchdog: recovered after Nms"` (N = time since last WARN, **not** total outage duration — see ADR-038). |
 | **Joint clamping** | All position commands clamped to per-joint [min, max] before sending. |
-| **Startup sequence** | 1) Open device, 2) Verify hand IDs and types, 3) Set mode=3 (position control), 4) Wait for first valid UDP packet before moving. |
+| **Startup sequence** | 1) Open device, 2) Verify hand IDs and types, 3) Set mode=3 (position control), 4) **Startup gate** (M6 / ADR-036) — wait up to `udcap.startup_timeout_s` (default 10) for first calibrated UDP frame; on timeout, `LOG_ERROR` + exit 2 (driver dtor still runs mode=0 + close_device, so hardware exit state matches normal shutdown). |
 | **Graceful shutdown** | On Ctrl+C **or SIGTERM** (ADR-023): set mode=0, close device. Note: mode=0 does not fully de-energize fingers (ADR-018) — physical power gating is out of scope. |
 | **Invalid data guard** | If JSON parse fails or parameter count wrong, skip frame (don't send stale data). |
 | **CalibrationStatus check** | Only forward data when UDCAP CalibrationStatus == 3 (calibrated). |
@@ -339,7 +339,8 @@ udex_to_xhand/
 udcap:
   host: "0.0.0.0"
   port: 9000
-  timeout_ms: 200          # Watchdog timeout
+  timeout_ms: 200          # Watchdog stale threshold (milliseconds, M6)
+  startup_timeout_s: 10    # M6 / ADR-036: abort if no calibrated UDP frame in N seconds
 
 xhand:
   protocol: "RS485"        # or "EtherCAT"
