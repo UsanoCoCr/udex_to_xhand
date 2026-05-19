@@ -423,7 +423,10 @@ mkdir -p build && cd build
 cmake .. -DBUILD_TESTS=ON
 cmake --build . --target test_safety test_mapper_snapshot
 ./test_safety
-./test_mapper_snapshot
+./test_mapper_snapshot \
+    --fixture ../tests/fixtures/mapper_baseline.json \
+    --example ../example.json \
+    --config  ../config.yaml
 ```
 
 **预期**：
@@ -460,7 +463,10 @@ rm -rf build && mkdir build && cd build
 cmake .. -DBUILD_TESTS=ON 2>&1 | tee ../docs/logs/m6-build-2026-05-19.log
 make -j$(nproc)                     2>&1 | tee -a ../docs/logs/m6-build-2026-05-19.log
 ./test_safety                       2>&1 | tee -a ../docs/logs/m6-build-2026-05-19.log
-./test_mapper_snapshot              2>&1 | tee -a ../docs/logs/m6-build-2026-05-19.log
+./test_mapper_snapshot \
+    --fixture ../tests/fixtures/mapper_baseline.json \
+    --example ../example.json \
+    --config  ../config.yaml         2>&1 | tee -a ../docs/logs/m6-build-2026-05-19.log
 ls -l udex_to_xhand
 ```
 
@@ -594,7 +600,10 @@ mkdir -p build && cd build
 cmake .. -DBUILD_TESTS=ON
 cmake --build . --target test_safety test_mapper_snapshot
 ./test_safety        # 预期: [test_safety] PASS (failures=0)
-./test_mapper_snapshot
+./test_mapper_snapshot \
+    --fixture ../tests/fixtures/mapper_baseline.json \
+    --example ../example.json \
+    --config  ../config.yaml
 cd ..
 
 # 静态自查
@@ -619,7 +628,10 @@ rm -rf build && mkdir build && cd build
 cmake .. -DBUILD_TESTS=ON 2>&1 | tee ../docs/logs/m6-build-2026-05-19.log
 make -j$(nproc)                    2>&1 | tee -a ../docs/logs/m6-build-2026-05-19.log
 ./test_safety                      2>&1 | tee -a ../docs/logs/m6-build-2026-05-19.log
-./test_mapper_snapshot             2>&1 | tee -a ../docs/logs/m6-build-2026-05-19.log
+./test_mapper_snapshot \
+    --fixture ../tests/fixtures/mapper_baseline.json \
+    --example ../example.json \
+    --config  ../config.yaml        2>&1 | tee -a ../docs/logs/m6-build-2026-05-19.log
 
 # [PC2] P1: watchdog（操作：3s 后到 Windows 关 UDCAP，10s 后重开）
 ./udex_to_xhand --config ../config.yaml --hand left --duration 20 \
@@ -711,7 +723,7 @@ git push
 | P5   | __  | `docs/logs/m6-startup-gate-2026-05-19.log`| time real = __s；exit = 2                          |
 
 ### 8.4 Deviations from plan
-- __（如有）__
+- **2026-05-19, snapshot test invocation typo (plan-side, fixed in follow-up commit)** — initial commit of this plan called `./test_mapper_snapshot` with no CLI args in 4 places (§4.1 L1, §4.2 P0, §5.1, §5.2 P0), which fails immediately with `required: --fixture <path> --example <path> --config <path>`. M5c commit `19b0205` had fixed the same typo in the M5c plan; the M6 plan regressed it. Operator hit this on PC2 during P0; plan corrected to the canonical 3-arg form `./test_mapper_snapshot --fixture ../tests/fixtures/mapper_baseline.json --example ../example.json --config ../config.yaml`. No code change. **Lesson for M7/M8 plans:** treat the M5b/M5c canonical `./test_mapper_snapshot` invocation as a copy-paste-only block; do not abbreviate.
 
 ### 8.5 Follow-ups / 新 ADR / 风险登记更新
 - __（如有）__
