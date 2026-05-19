@@ -24,14 +24,17 @@ class XHandDriver {
     XHandDriver& operator=(const XHandDriver&) = delete;
 
     // Opens serial, enumerates hands, identifies L/R via get_hand_type.
-    // Throws std::runtime_error on serial-open failure or empty hand list.
+    // Throws std::runtime_error on serial-open failure, empty hand list, or
+    // (M7 / ADR-040) when require_both=true and either Left or Right was not
+    // discovered — fail-closed on partial discovery under --hand both.
     // Per plan §3.3 deviation (user-approved 2026-05-18): does NOT read XHand
     // calibration state — XHand SDK has no hand-level CalibrationStatus field;
     // UDCAP-side calib is enforced in UdcapReceiver::try_recv.
-    void open();
+    void open(bool require_both = false);
 
     bool has_left()  const { return hand_id_left_.has_value(); }
     bool has_right() const { return hand_id_right_.has_value(); }
+    bool has_both()  const { return hand_id_left_.has_value() && hand_id_right_.has_value(); }
 
     // Sends 12 joint positions (radians) to one hand.
     // Throws std::runtime_error if that hand was not discovered (matches Python M3).
