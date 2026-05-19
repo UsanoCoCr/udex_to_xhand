@@ -566,3 +566,264 @@ If empty: "No right-hand edits needed; left-mirror starting hypothesis verified.
 | R7 | New `require_both` parameter inadvertently breaks an existing M5c / M6 `--hand left|right` workflow | LOW | MEDIUM | §4.5 P6' cross-check rerun. `require_both` defaults to `false`; all pre-M7 call sites are unchanged at the source level. |
 
 ---
+
+## 10. Revision 2 — Two-Port Split Architecture (2026-05-19)
+
+### 10.0 Why this revision exists
+
+PC2 §4.1 build succeeded; first §4.2 probe (`./udex_to_xhand --port /dev/ttyACMx --hand left --duration 3`) revealed:
+
+- `/dev/ttyACM0` does NOT exist on PC2. USB enumeration assigned `ttyACM1`..`ttyACM4`.
+- `dmesg` shows **two physical USB devices** (`usb 1-2.2`, `usb 1-2.3`), each a CDC composite exposing one primary control endpoint and one auxiliary endpoint:
+  - `usb 1-2.2 → ttyACM1` (primary, 1.0) + `ttyACM4` (aux, 1.2) — physically **Right XHand**
+  - `usb 1-2.3 → ttyACM2` (primary, 1.0) + `ttyACM3` (aux, 1.2) — physically **Left XHand**
+- Operator probe (2026-05-19) confirmed: `/dev/ttyACM2` → Left, `/dev/ttyACM1` → Right.
+
+This is **NOT** the single-port RS485 multi-drop topology that rev1 §0 / §3 / §4.2 / §7 assumed. Each XHand sits on its own USB-to-RS485 path with its own CDC-ACM node. Per rev1 §4.2 FAIL criterion + §9 R1: STOP and re-plan, do not silently split.
+
+### 10.1 Architecture decision (user-approved 2026-05-19)
+
+**Q1 = A**: `main.cpp` holds **two `XHandDriver` instances** (`driver_left`, `driver_right`), each owns one `XHandControl` instance on its own `/dev/ttyACMx`. `XHandDriver` itself stays a single-port, single-hand wrapper (its existing logic — enumerate `list_hands_id()`, label via `get_hand_type()` — already accommodates the "one hand per bus" case unchanged).
+
+**Q2 = i**: the rev1 `XHandDriver::open(require_both)` parameter is reverted (commit-level revert of `b95ac4b`). Under two-driver model, `require_both` has no caller — fail-closed semantics move into `main.cpp`, which checks `driver_left->has_left()` / `driver_right->has_right()` after each `open()`. `has_both()` is also dropped (main.cpp directly checks `driver_left && driver_right`).
+
+### 10.2 Section-by-section overrides
+
+The following rev1 sections are SUPERSEDED by the rev2 specifications below. Rev1 prose remains in place for review/historical context; rev2 governs implementation.
+
+#### 10.2.1 Override §1 — File list
+
+**Modified** (delta from rev1 §1; ⊖ = retracted from rev1, ⊕ = new in rev2):
+
+| File | rev2 delta |
+| --- | --- |
+| `src/xhand_driver.hpp` | ⊖ `require_both` arg + `has_both()` removed. File returns to pre-M7 (M5c/M6) shape. |
+| `src/xhand_driver.cpp` | ⊖ Same — `open()` reverts to no-arg, no fail-closed throw. |
+| `src/main.cpp` | ⊕ `XHandConfig` schema gains `left_serial_port` / `right_serial_port` (replaces single `serial_port`). `load_xhand_config` reads new keys. FULL-mode init builds 0/1/2 `XHandDriver` instances based on `--hand`. `run_actions` mirrors. Stale resend / shutdown / loop dispatch updated to address `driver_left` / `driver_right` independently. |
+| `config.yaml` | ⊕ Schema migration: `xhand.serial_port: "/dev/ttyACM0"` → `xhand.left_serial_port: "/dev/ttyACM2"` + `xhand.right_serial_port: "/dev/ttyACM1"`. Legacy `left_hand_id` / `right_hand_id` (never read by code) deleted. |
+| `tests/fixtures/mapper_baseline.json` | Regenerated in same commit as `config.yaml` (ADR-037). Diff restricted to `config_yaml_sha256` + `generated_at`; mapper values byte-identical (no `mapping.*` changes). |
+| `docs/decisions/039-rs485-two-port-split.md` | ⊕ NEW ADR documenting the two-port choice + retiring the rev1 ADR-040 pre-registration. |
+
+**Unchanged from rev1 §1**: `mapping.right` tuning workflow (§4.3 still applies); `docs/plans/00-roadmap.md` + `SPEC.md` updates on completion. `src/udcap_receiver.*` / `src/joint_mapper.*` / `src/safety.*` / `src/cli.*` still untouched.
+
+#### 10.2.2 Override §3 — Module specs
+
+##### 3.1' `XHandDriver` (no functional change vs M5c/M6)
+
+`open()` keeps its pre-M7 signature `void open()`. It opens its port, enumerates `list_hands_id()`, labels each id via `get_hand_type()` → `'L'`/`'R'`/other. Throws on serial-open failure or empty hand list. Single-bus-with-one-hand case is naturally handled: exactly one of `hand_id_left_` / `hand_id_right_` ends up populated, the other stays `nullopt`. **No new methods; no new parameters.**
+
+##### 3.2' `XHandConfig` + `load_xhand_config` (src/main.cpp)
+
+```cpp
+struct XHandConfig {
+    std::string left_serial_port {"/dev/ttyACM2"};  // M7 rev2 default — physical Left on PC2
+    std::string right_serial_port{"/dev/ttyACM1"};  // M7 rev2 default — physical Right on PC2
+    int baud_rate{3000000};
+    int update_rate_hz{100};
+    XHandPID pid{};
+};
+
+XHandConfig load_xhand_config(const YAML::Node& root) {
+    XHandConfig c;
+    auto x = root["xhand"];
+    if (x) {
+        if (x["left_serial_port"])  c.left_serial_port  = x["left_serial_port"].as<std::string>();
+        if (x["right_serial_port"]) c.right_serial_port = x["right_serial_port"].as<std::string>();
+        if (x["baud_rate"])         c.baud_rate         = x["baud_rate"].as<int>();
+        if (x["update_rate_hz"])    c.update_rate_hz    = x["update_rate_hz"].as<int>();
+        if (x["default_kp"])        c.pid.kp            = x["default_kp"].as<int>();
+        if (x["default_ki"])        c.pid.ki            = x["default_ki"].as<int>();
+        if (x["default_kd"])        c.pid.kd            = x["default_kd"].as<int>();
+        if (x["default_tor_max"])   c.pid.tor_max       = x["default_tor_max"].as<int>();
+        if (x["control_mode"])      c.pid.mode          = x["control_mode"].as<int>();
+    }
+    return c;
+}
+```
+
+##### 3.3' `--port` override semantics (cli + main)
+
+`--port` is the **single-side** port override. Combination matrix:
+
+| `--hand` | `--port /dev/ttyACMx` | Effect |
+| --- | --- | --- |
+| `left`  | provided | `xhand_cfg.left_serial_port  = x` |
+| `right` | provided | `xhand_cfg.right_serial_port = x` |
+| `both`  | provided | **cli error**, exit 2 — "use config.yaml for dual-hand ports" |
+| any     | absent   | use config.yaml values verbatim |
+
+Check in `main()` and `run_actions()` after `load_xhand_config()`.
+
+##### 3.4' FULL-mode driver setup (src/main.cpp, replacing rev1 §3.2)
+
+```cpp
+std::optional<XHandDriver> driver_left, driver_right;
+const bool want_left  = (args.hand != cli::HandSelect::Right);
+const bool want_right = (args.hand != cli::HandSelect::Left);
+
+if (!args.mock && !args.receiver_only) {
+    try {
+        if (want_left) {
+            driver_left.emplace(xhand_cfg.left_serial_port, xhand_cfg.baud_rate, xhand_cfg.pid);
+            driver_left->open();
+            if (!driver_left->has_left()) {
+                LOG_ERROR("xhand.left_serial_port=" << xhand_cfg.left_serial_port
+                          << " did not discover a Left hand (got "
+                          << (driver_left->has_right() ? "Right" : "none") << ")");
+                return 2;
+            }
+        }
+        if (want_right) {
+            driver_right.emplace(xhand_cfg.right_serial_port, xhand_cfg.baud_rate, xhand_cfg.pid);
+            driver_right->open();
+            if (!driver_right->has_right()) {
+                LOG_ERROR("xhand.right_serial_port=" << xhand_cfg.right_serial_port
+                          << " did not discover a Right hand (got "
+                          << (driver_right->has_left() ? "Left" : "none") << ")");
+                return 2;
+            }
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("XHandDriver: " << e.what());
+        return 2;
+    }
+}
+```
+
+The sanity check (`has_left()` / `has_right()` post-open) is the rev2 equivalent of rev1's `require_both` — it now also catches cabling errors (left/right ports swapped).
+
+##### 3.5' Main loop dispatch (rev1 §3.2 "args.hand-gated" logic now points at separate drivers)
+
+```cpp
+if (args.hand != cli::HandSelect::Right) {
+    auto v = mapper.map_left(frame_opt->l);
+    safety::clamp_in_place(v);
+    left_rad = v;
+    if (driver_left) {
+        driver_left->send_left(v);
+        last_left_rad = v;
+    }
+}
+if (args.hand != cli::HandSelect::Left) {
+    auto v = mapper.map_right(frame_opt->r);
+    safety::clamp_in_place(v);
+    right_rad = v;
+    if (driver_right) {
+        driver_right->send_right(v);
+        last_right_rad = v;
+    }
+}
+```
+
+Stale-resend branch:
+
+```cpp
+} else if ((driver_left || driver_right) && wdog.has_seen_frame() && wdog.is_stale(tick_start)) {
+    try {
+        if (driver_left  && last_left_rad)  driver_left ->send_left (*last_left_rad);
+        if (driver_right && last_right_rad) driver_right->send_right(*last_right_rad);
+    } catch (...) { /* ... unchanged ... */ }
+    /* ... rate-limited WARN unchanged ... */
+}
+```
+
+Shutdown:
+
+```cpp
+if (driver_left)  { try { driver_left ->shutdown(); } catch (const std::exception& e) { LOG_WARN("shutdown(left): "  << e.what()); } }
+if (driver_right) { try { driver_right->shutdown(); } catch (const std::exception& e) { LOG_WARN("shutdown(right): " << e.what()); } }
+```
+
+##### 3.6' `run_actions` (--actions mode) — same dual-driver pattern, scoped down
+
+Build 1 or 2 drivers based on `--hand`. Each preset send loop dispatches via `driver_left->send_left()` / `driver_right->send_right()`. `--hand both --actions` is now supported: both XHands play the preset sequence in lockstep (useful for dual bring-up).
+
+##### 3.7' `config.yaml` migration
+
+```yaml
+xhand:
+  protocol: "RS485"
+  left_serial_port:  "/dev/ttyACM2"   # M7 rev2: physical Left on PC2 (usb 1-2.3 primary)
+  right_serial_port: "/dev/ttyACM1"   # M7 rev2: physical Right on PC2 (usb 1-2.2 primary)
+  baud_rate: 3000000
+  control_mode: 3
+  default_kp: 100
+  default_ki: 0
+  default_kd: 0
+  default_tor_max: 300
+  update_rate_hz: 100
+```
+
+Removed keys: `serial_port` (replaced), `left_hand_id` / `right_hand_id` (never read by C++; hand id is auto-discovered per port). SHA-256 of `config.yaml` changes → `tests/fixtures/mapper_baseline.json` MUST be regenerated in the same commit (ADR-037).
+
+#### 10.2.3 Override §4.2 — Hardware enumeration
+
+The §4.2 PASS/FAIL fork is RESOLVED: hardware **is** two-port split (observed). The new §4.2 is a single sanity check per side:
+
+```bash
+# PC2 — confirm which CDC-ACM is which side (already done 2026-05-19; re-verify
+# any time the USB cables are reseated):
+cd ~/udex_to_xhand/build
+for port in /dev/ttyACM1 /dev/ttyACM2 /dev/ttyACM3 /dev/ttyACM4; do
+    echo "=== probing $port ==="
+    ./udex_to_xhand --port "$port" --hand left --duration 1 2>&1 | head -10 || true
+done | tee ~/udex_to_xhand/docs/logs/m7-enum-rev2-$(date +%F).log
+```
+
+PASS: exactly two ports return `hand_id=N type=Left|Right`. Match them against the values you write into `config.yaml`. Auxiliary endpoints (1.2 interface) should fail with `list_hands_id() returned empty` or a SDK 1501xxx error — that's expected (those are diagnostic ports).
+
+#### 10.2.4 Override §4.5 P6' — fail-closed test
+
+**Rev2 P6' scenario A** (port doesn't exist):
+
+```bash
+# Edit config.yaml left_serial_port to a non-existent path (e.g. /dev/ttyACM99),
+# regen fixture, commit "M7: P6' test bad left port", push.
+# PC2:
+git pull && cd build && make -j$(nproc)
+./udex_to_xhand --config ../config.yaml --hand both --duration 5 \
+    2>&1 | tee ~/udex_to_xhand/docs/logs/m7-fail-closed-bad-port-$(date +%F).log
+echo "exit=$?"
+# Expected: open_serial(/dev/ttyACM99) → 1501039 → throw → main returns 2.
+# Then REVERT the test edit + regen fixture + push.
+```
+
+**Rev2 P6' scenario B** (port exists but wrong side):
+
+```bash
+# Edit config.yaml: SWAP left_serial_port and right_serial_port (point left at the
+# physical right's port and vice versa). Regen fixture, commit, push.
+# PC2: pull + rebuild + run --hand both.
+# Expected: open succeeds, but post-open check fires:
+#   [ERROR] xhand.left_serial_port=/dev/ttyACM1 did not discover a Left hand (got Right)
+# Exit 2. REVERT + regen + push.
+```
+
+Rev1 §4.5 P6' (single-port partial discovery) no longer applies and is RETIRED.
+
+#### 10.2.5 Override §6 — Commit plan
+
+Rev2 commit sequence (supersedes rev1 §6 commits 1 and 8; rev1 commits 2–7 still apply for the right-hand tuning + log archive phases):
+
+1. **`M7 rev2: plan revision for two-port split topology`** — appends §10 to this plan file. (Already in flight as the user-facing rev2 commit.)
+2. **`M7 rev2: revert require_both — superseded by two-port architecture`** — reverts commit `b95ac4b` content in `src/xhand_driver.{hpp,cpp}` + `src/main.cpp:326`. Returns to pre-M7 driver shape.
+3. **`M7 rev2: two-XHandDriver dual-port + config schema + ADR-039`** — new `main.cpp` driver setup + loop dispatch + shutdown + run_actions; `config.yaml` schema migration; `tests/fixtures/mapper_baseline.json` regen; `docs/decisions/039-rs485-two-port-split.md`.
+4. ...rev1 commits 2–7 unchanged (right-hand sign tuning + log archives).
+5. **`M7 ✅: dual-hand integration verified on G1 PC2 (two-port split)`** — closeout.
+
+#### 10.2.6 Override §7 — ADR candidates
+
+- **ADR-039** (rev2): **RS485 two-port split** — each XHand on its own USB-to-RS485 path / its own CDC-ACM node. Decision: `main.cpp` instantiates two `XHandDriver` objects. Context cites this plan's §10.0 evidence; Alternatives list rejects (a) single-port multi-drop (not what the hardware exposes), (b) one `XHandDriver` holding two `XHandControl` instances (Q2-rejected). EtherCAT remains deferred per SPEC §2 upgrade path.
+- **ADR-040 (rev1)**: **RETIRED** before write. The `--hand both` fail-closed semantic still applies (cabling / missing-port detection in `main.cpp` post-open), but it does NOT need a dedicated ADR — it's a straightforward "log + return 2" pattern matching ADR-036's startup-gate philosophy.
+- ADR-041 / ADR-042 from rev1: unchanged (right-hand sign findings if any, latency findings if any).
+
+#### 10.2.7 Override §9 — Risks
+
+- **R1** (RS485 multi-drop fails): **CLOSED** — confirmed two-port split is the hardware reality. The risk did NOT materialize as "broken multi-drop"; it manifested as "the assumed topology was wrong". Lesson logged in §8 deviations.
+- **R3** (dual `send_command` saturates one RS485): **CLOSED / re-scoped** — each hand has its own bus; bus contention is no longer a concern. Latency now depends on USB scheduling and SDK serialization. Re-measure in §4.4.
+- **R7** (rev1 `require_both` regression): **CLOSED** — `require_both` reverted; no longer in the codebase.
+- **NEW R8**: PC2 USB topology dependency — `/dev/ttyACM{1,2}` mapping is fragile. Replug order, reboot, or hub power changes can shift assignments. Mitigation: §4.2 rev2 probe + `config.yaml` declared with comment; document the physical-USB-port-to-hand mapping in `SPEC.md §2` on M7 closeout so reseating physical USB cables can be planned.
+- **NEW R9**: Cabling swap (operator wires "left" cable to physical right hand) — caught by §3.4' `has_left()` / `has_right()` post-open check + clear LOG_ERROR.
+
+---
+
