@@ -42,8 +42,12 @@ struct UdcapConfig {
     int startup_timeout_s{10};   // M6: startup gate (no calibrated frame → abort)
 };
 
+// M7 rev2 (ADR-039): two-port split topology — each XHand on its own
+// USB-to-RS485 CDC-ACM endpoint. Defaults reflect observed PC2 mapping
+// (2026-05-19): usb 1-2.3 primary → ACM2 = Left, usb 1-2.2 primary → ACM1 = Right.
 struct XHandConfig {
-    std::string serial_port{"/dev/ttyACM0"};
+    std::string left_serial_port {"/dev/ttyACM2"};
+    std::string right_serial_port{"/dev/ttyACM1"};
     int baud_rate{3000000};
     int update_rate_hz{100};
     XHandPID pid{};
@@ -65,14 +69,15 @@ XHandConfig load_xhand_config(const YAML::Node& root) {
     XHandConfig c;
     auto x = root["xhand"];
     if (x) {
-        if (x["serial_port"])     c.serial_port    = x["serial_port"].as<std::string>();
-        if (x["baud_rate"])       c.baud_rate      = x["baud_rate"].as<int>();
-        if (x["update_rate_hz"])  c.update_rate_hz = x["update_rate_hz"].as<int>();
-        if (x["default_kp"])      c.pid.kp         = x["default_kp"].as<int>();
-        if (x["default_ki"])      c.pid.ki         = x["default_ki"].as<int>();
-        if (x["default_kd"])      c.pid.kd         = x["default_kd"].as<int>();
-        if (x["default_tor_max"]) c.pid.tor_max    = x["default_tor_max"].as<int>();
-        if (x["control_mode"])    c.pid.mode       = x["control_mode"].as<int>();
+        if (x["left_serial_port"])  c.left_serial_port  = x["left_serial_port"].as<std::string>();
+        if (x["right_serial_port"]) c.right_serial_port = x["right_serial_port"].as<std::string>();
+        if (x["baud_rate"])         c.baud_rate         = x["baud_rate"].as<int>();
+        if (x["update_rate_hz"])    c.update_rate_hz    = x["update_rate_hz"].as<int>();
+        if (x["default_kp"])        c.pid.kp            = x["default_kp"].as<int>();
+        if (x["default_ki"])        c.pid.ki            = x["default_ki"].as<int>();
+        if (x["default_kd"])        c.pid.kd            = x["default_kd"].as<int>();
+        if (x["default_tor_max"])   c.pid.tor_max       = x["default_tor_max"].as<int>();
+        if (x["control_mode"])      c.pid.mode          = x["control_mode"].as<int>();
     }
     return c;
 }
@@ -183,9 +188,34 @@ int run_actions(const cli::Args& args, const XHandConfig& xc) {
         return 2;
     }
 
-    XHandDriver driver(xc.serial_port, xc.baud_rate, xc.pid);
+    // M7 rev2: build 0/1/2 XHandDriver instances based on --hand. Each driver
+    // owns one CDC-ACM port. Post-open sanity check catches cabling swaps
+    // (left port returned a Right hand etc.) — plan rev2 §3.4'.
+    const bool want_left  = (args.hand != cli::HandSelect::Right);
+    const bool want_right = (args.hand != cli::HandSelect::Left);
+
+    std::optional<XHandDriver> driver_left, driver_right;
     try {
-        driver.open();
+        if (want_left) {
+            driver_left.emplace(xc.left_serial_port, xc.baud_rate, xc.pid);
+            driver_left->open();
+            if (!driver_left->has_left()) {
+                LOG_ERROR("xhand.left_serial_port=" << xc.left_serial_port
+                          << " did not discover a Left hand (got "
+                          << (driver_left->has_right() ? "Right" : "none") << ")");
+                return 2;
+            }
+        }
+        if (want_right) {
+            driver_right.emplace(xc.right_serial_port, xc.baud_rate, xc.pid);
+            driver_right->open();
+            if (!driver_right->has_right()) {
+                LOG_ERROR("xhand.right_serial_port=" << xc.right_serial_port
+                          << " did not discover a Right hand (got "
+                          << (driver_right->has_left() ? "Left" : "none") << ")");
+                return 2;
+            }
+        }
     } catch (const std::exception& e) {
         LOG_ERROR("XHandDriver: " << e.what());
         return 2;
@@ -203,14 +233,9 @@ int run_actions(const cli::Args& args, const XHandConfig& xc) {
         auto rad = preset_actions::deg_to_rad(p->deg);
         safety::clamp_in_place(rad);
 
-        // Honor --hand selection (plan §4 mutex matrix: --actions + --hand ✅,
-        // mirrors FULL-mode dispatch in the loop below). Default is both.
-        const bool want_left  = (args.hand != cli::HandSelect::Right);
-        const bool want_right = (args.hand != cli::HandSelect::Left);
-
         try {
-            if (want_left  && driver.has_left())  driver.send_left(rad);
-            if (want_right && driver.has_right()) driver.send_right(rad);
+            if (driver_left)  driver_left ->send_left (rad);
+            if (driver_right) driver_right->send_right(rad);
         } catch (const std::exception& e) {
             LOG_ERROR("send: " << e.what());
             break;
@@ -225,11 +250,8 @@ int run_actions(const cli::Args& args, const XHandConfig& xc) {
         }
     }
 
-    try {
-        driver.shutdown();
-    } catch (const std::exception& e) {
-        LOG_WARN("shutdown: " << e.what());
-    }
+    if (driver_left)  { try { driver_left ->shutdown(); } catch (const std::exception& e) { LOG_WARN("shutdown(left): "  << e.what()); } }
+    if (driver_right) { try { driver_right->shutdown(); } catch (const std::exception& e) { LOG_WARN("shutdown(right): " << e.what()); } }
     return 0;
 }
 
@@ -260,7 +282,16 @@ int main(int argc, char** argv) {
             // the canonical M3-equivalent command shape.
         }
         XHandConfig xc = root.IsNull() ? XHandConfig{} : load_xhand_config(root);
-        if (args.port_override) xc.serial_port = *args.port_override;
+        if (args.port_override) {
+            // M7 rev2: --port is a single-side override; ambiguous with --hand both.
+            if (args.hand == cli::HandSelect::Both) {
+                LOG_ERROR("--port cannot be combined with --hand both; "
+                          "use config.yaml left_serial_port / right_serial_port");
+                return 2;
+            }
+            if (args.hand == cli::HandSelect::Left)  xc.left_serial_port  = *args.port_override;
+            if (args.hand == cli::HandSelect::Right) xc.right_serial_port = *args.port_override;
+        }
         return run_actions(args, xc);
     }
 
@@ -275,7 +306,16 @@ int main(int argc, char** argv) {
 
     UdcapConfig udcap_cfg = load_udcap_config(root);
     XHandConfig xhand_cfg = load_xhand_config(root);
-    if (args.port_override) xhand_cfg.serial_port = *args.port_override;
+    if (args.port_override) {
+        // M7 rev2: same semantics as run_actions — single-side override.
+        if (args.hand == cli::HandSelect::Both) {
+            LOG_ERROR("--port cannot be combined with --hand both; "
+                      "use config.yaml left_serial_port / right_serial_port");
+            return 2;
+        }
+        if (args.hand == cli::HandSelect::Left)  xhand_cfg.left_serial_port  = *args.port_override;
+        if (args.hand == cli::HandSelect::Right) xhand_cfg.right_serial_port = *args.port_override;
+    }
 
     const char* mode_str =
           args.mock          ? "MOCK (no UDP, no XHand)"
@@ -319,11 +359,37 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::optional<XHandDriver> driver;
+    // M7 rev2 (ADR-039): two-port split — instantiate one XHandDriver per
+    // requested side, each on its own CDC-ACM port. Post-open has_left() /
+    // has_right() sanity-check catches cabling swaps. Receiver-only / mock
+    // skip both. Fail-closed: any side failing to open exits 2 (driver dtors
+    // run mode=0 + close on whichever sides did open before the failure).
+    const bool want_left  = (args.hand != cli::HandSelect::Right);
+    const bool want_right = (args.hand != cli::HandSelect::Left);
+
+    std::optional<XHandDriver> driver_left, driver_right;
     if (!args.mock && !args.receiver_only) {
         try {
-            driver.emplace(xhand_cfg.serial_port, xhand_cfg.baud_rate, xhand_cfg.pid);
-            driver->open();
+            if (want_left) {
+                driver_left.emplace(xhand_cfg.left_serial_port, xhand_cfg.baud_rate, xhand_cfg.pid);
+                driver_left->open();
+                if (!driver_left->has_left()) {
+                    LOG_ERROR("xhand.left_serial_port=" << xhand_cfg.left_serial_port
+                              << " did not discover a Left hand (got "
+                              << (driver_left->has_right() ? "Right" : "none") << ")");
+                    return 2;
+                }
+            }
+            if (want_right) {
+                driver_right.emplace(xhand_cfg.right_serial_port, xhand_cfg.baud_rate, xhand_cfg.pid);
+                driver_right->open();
+                if (!driver_right->has_right()) {
+                    LOG_ERROR("xhand.right_serial_port=" << xhand_cfg.right_serial_port
+                              << " did not discover a Right hand (got "
+                              << (driver_right->has_left() ? "Left" : "none") << ")");
+                    return 2;
+                }
+            }
         } catch (const std::exception& e) {
             LOG_ERROR("XHandDriver: " << e.what());
             return 2;
@@ -413,8 +479,8 @@ int main(int argc, char** argv) {
                     auto v = mapper.map_left(frame_opt->l);
                     safety::clamp_in_place(v);
                     left_rad = v;
-                    if (driver) {
-                        driver->send_left(v);
+                    if (driver_left) {
+                        driver_left->send_left(v);
                         last_left_rad = v;     // M6: cache for stale resend
                     }
                 }
@@ -422,8 +488,8 @@ int main(int argc, char** argv) {
                     auto v = mapper.map_right(frame_opt->r);
                     safety::clamp_in_place(v);
                     right_rad = v;
-                    if (driver) {
-                        driver->send_right(v);
+                    if (driver_right) {
+                        driver_right->send_right(v);
                         last_right_rad = v;    // M6: cache for stale resend
                     }
                 }
@@ -434,8 +500,8 @@ int main(int argc, char** argv) {
             }
 
             // Plan §3.2: sample receive→post-send latency once per frame,
-            // only in FULL mode (driver engaged). recv_ts is steady_clock.
-            if (driver) {
+            // only in FULL mode (any driver engaged). recv_ts is steady_clock.
+            if (driver_left || driver_right) {
                 using namespace std::chrono;
                 const auto t1 = steady_clock::now();
                 const double ms =
@@ -460,14 +526,15 @@ int main(int argc, char** argv) {
                           << " | fps=" << std::fixed << std::setprecision(1) << fps
                           << std::endl;
             }
-        } else if (driver && wdog.has_seen_frame() && wdog.is_stale(tick_start)) {
+        } else if ((driver_left || driver_right) && wdog.has_seen_frame() && wdog.is_stale(tick_start)) {
             // M6 (plan §2.1 / §3.2, ADR-035): stale — resend last commanded
             // rad to keep the position controller's last setpoint alive over
             // RS485; WARN log rate-limited to 1Hz so 30-min stress still fits.
             // Stale ticks do NOT update latency_stats (no fresh recv_ts).
+            // M7 rev2: route per side to its own driver.
             try {
-                if (last_left_rad)  driver->send_left (*last_left_rad);
-                if (last_right_rad) driver->send_right(*last_right_rad);
+                if (driver_left  && last_left_rad)  driver_left ->send_left (*last_left_rad);
+                if (driver_right && last_right_rad) driver_right->send_right(*last_right_rad);
             } catch (const std::exception& e) {
                 LOG_ERROR("stale resend: " << e.what());
                 shutdown_flag.store(true);
@@ -488,9 +555,15 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_until(next_tick);
     }
 
-    if (driver) {
-        try { driver->shutdown(); }
-        catch (const std::exception& e) { LOG_WARN("shutdown: " << e.what()); }
+    // M7 rev2: each side shuts down its own driver. Independently wrapped so a
+    // failure on one side cannot prevent mode=0 + close on the other.
+    if (driver_left) {
+        try { driver_left->shutdown(); }
+        catch (const std::exception& e) { LOG_WARN("shutdown(left): " << e.what()); }
+    }
+    if (driver_right) {
+        try { driver_right->shutdown(); }
+        catch (const std::exception& e) { LOG_WARN("shutdown(right): " << e.what()); }
     }
 
     if (!latency_stats.empty()) {

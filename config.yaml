@@ -6,10 +6,13 @@ udcap:
 
 xhand:
   protocol: "RS485"
-  serial_port: "/dev/ttyACM0"
+  # M7 rev2 (ADR-039): two-port split topology. Each XHand sits on its own
+  # USB CDC-ACM device on PC2 (NOT RS485 multi-drop). Mapping observed
+  # 2026-05-19: usb 1-2.3 primary → /dev/ttyACM2 = Left; usb 1-2.2 primary
+  # → /dev/ttyACM1 = Right. Re-probe whenever USB cables are reseated.
+  left_serial_port:  "/dev/ttyACM2"
+  right_serial_port: "/dev/ttyACM1"
   baud_rate: 3000000
-  left_hand_id: 0
-  right_hand_id: 1
   control_mode: 3          # 0=passive, 3=position, 5=force
   default_kp: 100
   default_ki: 0
