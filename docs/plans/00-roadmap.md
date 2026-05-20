@@ -10,6 +10,8 @@
 - 2026-05-19 — 第 7 次修订 — **M6 在 G1 PC2 上 5/5 安全场景通过；M6 整体 ✅**。Watchdog stale 反应（10 条 1Hz `LOG_WARN` + `recovered after 87ms` + hand 物理保持）/ SIGINT mode=0（视觉，log 因 `tee` 截断不完整）/ SIGTERM mode=0（log 完整落盘）/ per-joint clamp 收窄后食指 J4 停在 30°（视觉）/ Startup gate 10s 超时 `LOG_ERROR` + driver 析构 mode=0+close —— 全部行为级符合 SPEC §5。新增 ADR-035（stale-resend @ 100Hz + LOG_WARN @ 1Hz）/ 036（startup gate 10s, exit 2）/ 037（snapshot fixture 随 config.yaml schema 变化必须 regen；M6 实测被 ADR-030 SHA 自校验在 P0 捕获）/ 038（recovered Nms 语义 = 自最近一次 WARN 起、非总停发时长；与 plan §4.2 P1 预期错位的记录）。Known issues：P2 SIGINT 下 `tee` 截断（M5c §6.6 SIGTERM 同源问题在 SIGINT 上仍存在，操作员视觉确认 OK，未来用背景化 + `kill -INT` 模式）；watchdog/clamp 长 session 单点 latency outlier ≈ 100ms（M5c 是 10.68ms；p95 稳定 9.62ms 不变；留 M8 stress test 排查）。Execution Record 见 [plan §8](./20260519-m6-safety-hardening-plan.md#8-execution-record-filled-at-end-of-m6)，日志归档 `docs/logs/m6-{build,watchdog,sigint,sigterm,clamp,startup-gate}-2026-05-19.log`（6 个）。
 - 2026-05-19 — 第 8 次修订 — **M7 在 G1 PC2 上双手集成验证通过；M7 整体 ✅**（不过覆盖度低于 M5c/M6，详见下文）。架构关键转折：plan rev1 假设的单口 RS485 multi-drop 在硬件 probe 中被证伪 —— PC2 实际两个独立 USB CDC-ACM 端点，一只 XHand 一条总线。同日 plan 改 rev2（commit b2253da），代码改双 `XHandDriver`（commit 4111a82：`main.cpp` 持 `driver_left/right` 两个 `optional`、`config.yaml` schema 拆 left/right_serial_port、ADR-039 落地）。rev1 引入的 `XHandDriver::open(require_both)` 由 commit 375e8e7 revert。**执行验证状态**：§4.1 P0 build / snapshot / test_safety / §4.2 双口枚举 / §4.5 P2b' dual SIGTERM mode=0×2 + close ✅ log 实证；`--hand left` 单手回退 latency `n=310 avg=9.59 p95=9.63 max=10.69ms` 与 M5c baseline 字节一致 → 双驱动重构无单手回退；§4.5 P1' watchdog stale / P3' clamp / P5' startup gate timeout / P6' A/B fail-closed / §4.3 右手单指逐项验收 / §4.4 60s 双手干净 teleop —— **未 log 实证**，操作员视觉确认通过。**双手延迟**（m7-watchdog-dual 25s session, n=1164）`avg=19.38 p95=19.20 max=111.17 ms`：avg/p95 ≈ 2× M5c 单手 baseline 是双 `send_command` 串行 over 两条独立 USB-RS485 路径的结构性代价，p95 在 20ms 预算内 0.80ms 余量；max=111ms 单点 outlier 与 M6 roadmap rev 7 ~100ms outlier 同源，推到 M8 30 min 压测调查。新增 ADR-039（双口架构，retire rev1 ADR-040）/ ADR-041（双口延迟特性 + ~100ms outlier 推到 M8）/ ADR-042（PC2 CDC-ACM 枚举 session-local，需每会话重探）。同日两次硬件 probe 间右手端口从 ACM1 漂到 ACM0（ADR-042 直接 trigger），M7 ✅ commit 把 `config.yaml` pin 到实测 ACM2/ACM0。SPEC §2 架构图重画为双 RS485 路径；§10 R3 关闭（多 drop 不存在），新增 R11（latency outlier）/ R12（USB 枚举漂移）；§12 Q3 状态更新（右手 sign 验证留 M8），Q4 RESOLVED。Known issues 落 plan §8.4：(a) plan §4.4 / §4.5 P1'/P5'/P6' A/B 未 log captured，M8 需保持 log 纪律（背景化 + `kill -TERM`，不要 SIGINT）；(b) right-hand mapping starting hypothesis 未充分验证，M8 验收测试（抓杯）是该 hypothesis 的实战检验；(c) 双口架构 USB 枚举漂移已影响一次会话（plan rev2 内）。Execution Record 见 [plan §8](./20260519-m7-dual-hand-integration-plan.md#8-execution-record-fill-at-end-of-m7)，日志归档 `docs/logs/m7-{cmake,make,snapshot,test-safety,enum,watchdog-dual,clamp-dual,single-regression}-2026-05-19.log`（8 个）。
 - 2026-05-18 — 第 5 次修订 — **M5c 在 G1 PC2 上真实硬件复测通过；M5 整体 ✅**。`--actions fist,palm,v,ok`（M3 等价物）4 个动作全部物理观察通过（hand_id=1 type=Left，SDK 1.4.3；2 次 startup CRC，ADR-017 log-not-crash 覆盖）。`--config ../config.yaml --hand left --duration 30`（M4 等价物）戴 UDCAP 手套单手实时跟随：5 项手指 + 握拳 + 张开目检通过，1773 valid frames / 3000 ticks / 0 parse errors，**latency_ms{n=1773 avg=9.60 p95=9.62 max=10.68}** —— 远低于 SPEC §9 phase 3.9 的 50ms 阈值（avg ≈ 19% ceiling）。SIGTERM → mode=0 + close_device 视觉验证通过（log 因 plan §6.6 `kill -TERM $!→tee` 截断，已 post-run 修复）。新增 ADR-032 / 033 / 034（preset 表 header-only + Python 字节一致脚本 / latency stats 用 vector+sort 而非 streaming / `--actions` 模式 tolerate 缺失 config.yaml）。§6.2 LOCAL→PC2 sync + §6.10 log pull 因 PC2 sshd 预 banner 拒连未走 rsync，改用 git push/pull + 手工 log 复制；§6.7 网络专用 log 未产，UDP 通路由 §6.8 teleop log 中 "first packet from 192.168.3.24" + 0 parse errors 反证。Execution Record 见 [plan §11](./20260518-m5c-pc2-hardware-revalidation-plan.md#11-execution-record-filled-2026-05-18)，日志归档 `docs/logs/m5c-{cmake,make,ttyacm,actions,sigterm,teleop-left}-2026-05-18.log`（6 个）。
+- 2026-05-20 — 第 10 次修订 — 新增 **M10: 中文 README**，作为项目交付 milestone。在 M9 完成后写一份面向他人的中文 README，覆盖前置依赖 / 硬件接线 / 构建 / 运行 / 数据采集 / 常见故障，目标是让没参与开发的人能照着 README 把代码库跑起来并理解架构。预计 0.5d。
+- 2026-05-20 — 第 9 次修订 — 新增 **M9: ROS2 数据记录**，作为项目收尾 milestone。背景：灵巧手部署在机器人本体上，用户担心 XHand action 数据与机器人 action 数据时间轴不同步；师兄机器人侧已用 ROS2 + rosbag2 录所有 action+timestamp，灵巧手做同 stack 集成 → 同一 /clock 节拍 publish 即天然同步。用例升级为「为下游 BC/IL 训练采集 (observation, action) pair」，因此 observation 必须包含 XHand `read_state()` 实测关节角，而不只是 commanded 值。本 milestone 同时打破 CLAUDE.md 现有两条约束（«Do NOT use ROS2» / «Do NOT read XHand sensors»），各走独立 ADR 限定废除范围（仅 M9 数据记录路径 / 仅 offline observation 不进控制闭环）。决策依据：2026-05-20 用户访谈四问 — ROS2（distro 待师兄确认）/ udex_to_xhand 自身变 ROS2 node 直接 publish / read_state 主循环同步满采 / sensor_msgs/JointState + 自定义 HandDiagnostics 五 topic / PC2 本地起独立 rosbag2 record。预计 2d，拆 M9a-e。
 
 ---
 
@@ -335,6 +337,203 @@ ls ./udex_to_xhand   # 预期: ELF aarch64 可执行文件
 
 ---
 
+## M9: ROS2 数据记录（训练数据采集）
+
+**目标**: 把 `udex_to_xhand` 从纯 C++ 二进制升级为 ROS2 node，把双手实时遥操中产生的 action（commanded 12 关节）+ observation（XHand `read_state()` 12 关节实测）+ 原始 24 路 UDCAP 输入 + 三段时间戳全部 publish 到 ROS2 topic，在 PC2 本地用独立 `ros2 bag record` 落盘。输出 schema 与师兄机器人侧现有 rosbag 共用同一 `/clock`、共用 `sensor_msgs/JointState` 标准类型 → 双方 bag 可按 timestamp 直接 merge，供下游 BC / IL 模型训练消费。这是项目收尾 milestone — 把已通过 M8 验收的遥操变成可重放、可训练的数据流水线。
+
+**为什么用 ROS2 + 为什么 read_state 必须打开**:
+- 师兄机器人侧已用 ROS2 + rosbag2 录所有 action / timestamp。灵巧手做同 stack 集成是「与机器人侧时间轴对齐」成本最低的路径 — 同一 ROS `/clock` 节拍下 publish 即天然同步，不需要事后按墙钟 merge
+- 用例升级为 BC/IL 训练数据采集：训练样本是 (observation, action) pair，observation 必须是 XHand 实测关节角 `read_state()`，不能只用 commanded 值（否则训出来的模型不知道真实硬件响应特征）
+- 替代方案（独立 bridge node / 内嵌 rosbag2 writer）都引入多一跳时间戳同步问题；udex_to_xhand 自身变 ROS2 node 是单一 `/clock` 语义、最少跨进程跳转
+
+**两条 CLAUDE.md 现有约束需在本 milestone 显式废除（各走独立 ADR 限定范围）**:
+- 「Do NOT use ROS2 (`xhand_control_ros2/` exists in repo as reference only)」 — 原意是 100Hz 控制循环不引入 ros2_control 框架开销；M9 仅在主循环出口加 publish 路径，不引入 ros2_control / ros2_controllers / lifecycle_node 等控制框架。走 **ADR-043** 限定废除范围
+- 「Do NOT read XHand sensors / 实现 force feedback」 — 原意是防止把 `read_state` 接入实时控制闭环（反馈控制需独立设计）；M9 仅在主循环 `send_command` 之后调用一次 `read_state`，结果只 publish 到 ROS topic，不参与下一帧 command 计算。走 **ADR-044** 限定废除范围
+
+**前置已确认（2026-05-20 用户访谈）**:
+- ROS 版本: ROS2（具体 distro 待师兄确认，候选 Humble / Iron / Jazzy；本 milestone M9a 第一步即敲定）
+- 集成形态: `udex_to_xhand` 本身变 ROS2 node，直接 publish，不走外挂 bridge / 不走内嵌 rosbag2 writer
+- `read_state` 策略: 主控环路上同步调用，100Hz 满采 — observation 与 action 同帧
+- Msg schema: action + state 走 `sensor_msgs/JointState`；raw UDCAP + safety + latency 走自定义 `udex_to_xhand_msgs/HandDiagnostics`
+- Topic 命名: `/xhand/{left,right}/{command,state}` 四个 JointState + `/xhand/diagnostics` 一个
+- Bag ownership: PC2 本地起独立 `ros2 bag record /xhand/*`（不依赖机器人侧 record 配置）
+
+**内容**:
+
+### M9a · ROS2 环境 + 师兄侧对齐（0.25d）
+- 与师兄敲定: 机器人侧 ROS2 distro / `/clock` 来源（rosbag --clock / sim_time / 真实墙钟）/ 现有 action topic namespace（确认 `/xhand/...` 命名不与已有 topic 冲突）/ 师兄 dataloader 是否能直接吃 `sensor_msgs/JointState`
+- PC2 上安装对应 distro: `sudo apt install ros-<distro>-ros-base ros-<distro>-rclcpp ros-<distro>-sensor-msgs ros-<distro>-rosbag2-storage-default-plugins ros-<distro>-rosbag2-transport`
+- 验证: `source /opt/ros/<distro>/setup.bash && ros2 topic list` 不报错
+- 验收: `ros2 run demo_nodes_cpp talker` + 另一终端 `ros2 topic echo /chatter` 跑通；师兄回复以邮件 / 聊天记录附在 plan §execution-record
+
+### M9b · `udex_to_xhand_msgs` 包 + msg schema（0.25d）
+- 新建 `udex_to_xhand_msgs/` ament_cmake 子包（仓库根目录），独立于 `udex_to_xhand` 主包
+- 定义 `HandDiagnostics.msg`:
+  ```
+  std_msgs/Header header
+  float64[24] left_udcap_raw                   # l0-l23 原始度数
+  float64[24] right_udcap_raw                  # r0-r23 原始度数
+  builtin_interfaces/Time udcap_frame_stamp    # UDCAP JSON 内时间戳（若有，否则零）
+  builtin_interfaces/Time receive_stamp        # 本机收到 UDP 时刻（steady_clock 起点 epoch 折算）
+  builtin_interfaces/Time send_stamp           # send_command 调用前时刻
+  float32 cycle_latency_ms                     # 本 tick UDP→send 总耗时
+  uint8 safety_flags                           # bit0=stale frame, bit1=clamp triggered, bit2=parse error
+  ```
+- 5 个 topic 的 QoS profile 选 `rclcpp::SensorDataQoS()`（best_effort，depth=10）— 数据采集场景丢一帧可接受，绝不阻塞主循环
+- 验收: `colcon build --packages-select udex_to_xhand_msgs` 干净通过；`ros2 interface show udex_to_xhand_msgs/msg/HandDiagnostics` 输出 schema 正确
+
+### M9c · `udex_to_xhand` → ROS2 node（1d）
+- 顶层 `CMakeLists.txt` 改造: 保留 `find_package(xhand_control HINTS xhand_control_sdk/share)`；新增 `find_package(rclcpp REQUIRED)` + `find_package(sensor_msgs REQUIRED)` + `find_package(udex_to_xhand_msgs REQUIRED)`；用 `ament_target_dependencies(udex_to_xhand rclcpp sensor_msgs udex_to_xhand_msgs)` 接通；保留原有 `nlohmann_json` / `yaml-cpp` / `libcurl` / `libssl` 链接
+- 新增 `src/ros_publisher.{hpp,cpp}`: 持 5 个 `rclcpp::Publisher`（4 个 `JointState` + 1 个 `HandDiagnostics`），暴露 `publish_left_command(joints, stamp)` / `publish_left_state(joints, currents, stamp)` / `publish_right_*` / `publish_diagnostics(...)` API。内部封装 `rclcpp::Node`（名字 `udex_to_xhand_node`）
+- `src/xhand_driver.{hpp,cpp}`: 新增 `HandState_t read_state()` 包装（封装 `xhand_control::XHandControl::read_state`），返回 12 个 position 弧度 + 12 个 current。ADR-044 范围内**仅作 observation 输出**，禁止被 `joint_mapper` 或安全层引用
+- `src/main.cpp` 主循环 tick 顺序（M9 后定型）:
+  1. `udcap_receiver.try_recv()` → raw 24 路 + `udcap_frame_stamp` + `receive_stamp`
+  2. `joint_mapper.map()` → commanded 12 路（per hand）
+  3. `xhand_driver.send_command()` → 记 `send_stamp`
+  4. `xhand_driver.read_state()` → observed 12 路 + currents（双手各一次）
+  5. `ros_publisher.publish_all(...)` → 4 JointState + 1 diagnostics
+- CLI 新增 `--no-ros` flag，沿用 M5b 起的 standalone 模式（允许不带 ROS2 环境跑 — for snapshot test / `--actions` 预设 / regression 测试）
+- 验收: `colcon build --symlink-install --packages-select udex_to_xhand`；`ros2 run udex_to_xhand udex_to_xhand --config config.yaml` 启动后另一终端 `ros2 topic hz /xhand/left/command` 显示 ≈100Hz；`ros2 topic echo /xhand/left/state` 应见 position[12]+effort[12]；`ros2 topic echo /xhand/diagnostics` 应见 raw_udcap + safety_flags + cycle_latency_ms
+
+### M9d · Latency 回归（0.25d）
+- 戴手套跑 30s 双手 teleop（UDCAP 在线），在 `--config config.yaml --hand both` 下打 `latency_ms{n avg p95 max}`（沿用 M5c / M7 的 vector+sort stats，ADR-033）
+- 与 M7 单帧基线 `avg=19.38 p95=19.20 max=111.17` 对比，预算: read_state ×2（≈2-4ms RS485 同步读）+ ROS publish ×5（≈1-2ms in-process）→ M9 后 avg 估 22-26ms，p95 估 25-28ms，距 SPEC §9 50ms 阈值仍留 40%+ 余量
+- 若 p95 > 40ms: 走 ADR-04x 降级到 state 30Hz 采样（访谈第 3 选项），主循环保持 100Hz 但 read_state 每 3 tick 才调一次；dataloader 侧 interpolate
+- 验收: latency 报告 + 与 M7 baseline 对比表入 plan §execution-record；落日志归档 `docs/logs/m9d-latency-<date>.log`
+
+### M9e · rosbag 录制 + 端到端验收（0.25d）
+- 起独立 `ros2 bag record -o /var/log/udex_to_xhand/teleop-<ISO8601> /xhand/left/command /xhand/left/state /xhand/right/command /xhand/right/state /xhand/diagnostics`（`/var/log/udex_to_xhand/` 提前创建 + `chown` 当前用户）
+- 跑一段 60s 双手 teleop，含 M8 抓杯流程（XHand 装在 G1 末端 → 抓桌上杯子 → 保持 3s → 放下）
+- bag 落盘验证:
+  - `ros2 bag info <path>` 输出 5 个 topic，各 ≈ 6000 messages（100Hz × 60s），无 dropped messages 警告
+  - `ros2 bag play <path>` + `ros2 topic echo /xhand/left/command` 可正确重放
+  - 抽 1 帧用 `ros2 bag info --verbose` 看 `header.stamp` 与 `receive_stamp` 字段，确认同帧 `/xhand/*/command` + `/xhand/*/state` 的 stamp 一致
+- 师兄侧 dataloader 试加载: bag 拷给师兄，验证他的 BC 训练 pipeline 能识别 `sensor_msgs/JointState` 并读出 `(left.command, left.state, right.command, right.state)` 四元组，且与机器人侧 bag 的 robot action 在同一 `/clock` 时间轴上无明显错位（visually compare timeline in `rqt_bag` 或写一个 ros2 python script 抽 sample）
+
+**完成定义**:
+- `ros2 bag info teleop-<...>` 显示 5 topic × ≈6000 msg，时间跨度 ≈60s，无 dropped messages
+- bag 内 `/xhand/*/command` 与 `/xhand/*/state` 在同一 tick 的 `header.stamp` 内成对出现（offline script 抽样验证）
+- 60s session 内含一次成功抓杯（M8 acceptance test 的子集，杯子离桌 ≥3s）
+- latency p95 < 30ms（M7 baseline + ROS publish + read_state 后）；avg / p95 / max 入 ADR-04x 记录基线
+- 师兄确认能用他的 dataloader 加载本 bag 与机器人 bag、双方 action sequence 在同一 `/clock` 时间轴上无明显错位（书面确认入 plan §execution-record）
+
+```bash
+# M9a — ROS2 安装 + verify（distro 占位为 humble，待 M9a 确认后替换）
+sudo apt install ros-humble-ros-base ros-humble-rclcpp ros-humble-sensor-msgs \
+                 ros-humble-rosbag2-storage-default-plugins ros-humble-rosbag2-transport
+source /opt/ros/humble/setup.bash
+ros2 run demo_nodes_cpp talker &
+ros2 topic echo /chatter   # 应能 echo
+
+# M9b — msg 包
+colcon build --packages-select udex_to_xhand_msgs
+source install/setup.bash
+ros2 interface show udex_to_xhand_msgs/msg/HandDiagnostics
+
+# M9c — udex_to_xhand 作为 ROS2 node
+colcon build --packages-select udex_to_xhand
+ros2 run udex_to_xhand udex_to_xhand --config config.yaml
+# 另一终端
+ros2 topic hz /xhand/left/command      # 期望 ~100Hz
+ros2 topic echo /xhand/left/state      # 应见 12 position + 12 effort
+ros2 topic echo /xhand/diagnostics
+
+# M9e — 录制 + 抓杯验收
+mkdir -p /var/log/udex_to_xhand
+ros2 bag record -o /var/log/udex_to_xhand/teleop-$(date -Iseconds) \
+    /xhand/left/command /xhand/left/state \
+    /xhand/right/command /xhand/right/state \
+    /xhand/diagnostics &
+ros2 run udex_to_xhand udex_to_xhand --config config.yaml --duration 60
+# 戴手套抓杯
+kill %1   # 停 bag
+ros2 bag info /var/log/udex_to_xhand/teleop-<latest>
+```
+
+**依赖**: M7（双手集成已通过）、M8（抓杯 acceptance — 是本 milestone 录制场景的内容）、ROS2 已装在 PC2
+
+**ADRs**:
+- ADR-043: relax CLAUDE.md «Do NOT use ROS2» — 仅限 M9 数据记录路径（rclcpp + sensor_msgs + rosbag2），不含 ros2_control / ros2_controllers / lifecycle_node 等控制框架
+- ADR-044: relax CLAUDE.md «Do NOT read XHand sensors / force feedback» — 仅限 offline observation publish，`read_state` 结果只进 ROS topic，禁止被 `joint_mapper` / `safety` / `main` 控制路径引用
+- ADR-045（M9a 后落）: ROS2 distro 选型 + `/clock` 同步策略（与机器人侧 sim_time 对齐 vs PC2 wall clock + QoS 选择理由）
+- ADR-046（M9b 后落）: rosbag2 storage backend 选型（sqlite3 default vs mcap）
+- ADR-047（M9d 后落，条件性）: 若 latency p95 > 30ms → state 降频策略 + dataloader 侧 interpolation 约定
+
+**Post-M9 文档同步（落 M9 ✅ 时一并完成）**:
+- CLAUDE.md «Constraints — do NOT» 段两条（read XHand sensors / use ROS2）改为「除 M9 数据记录路径外不得使用」并 link ADR-043/044
+- CLAUDE.md «Architecture» 段加 ROS2 publish 数据流分支 + `udex_to_xhand_msgs/` 包说明
+- SPEC.md 增 §13「数据采集 schema」章节，落 topic 列表 / msg 结构 / bag 命名规约 / `/clock` 约定
+- README 增加 ROS2 build + run 流程（`colcon build` 取代 `cmake .. && make`） — 注：完整 README 重写见 M10
+
+---
+
+## M10: 中文 README（项目交付）
+
+**目标**: 在 M9 完成、整套数据流水线跑通后，写一份**中文、清晰、简洁**的 README，让一个**没参与开发的新人**能照着 README 完成「准备环境 → 接好硬件 → 编译 → 跑通双手遥操 → 录一段训练数据」全流程，并能在出常见故障时自行定位。这是项目对外交付物，不是开发者笔记。
+
+**为什么单独立 milestone**:
+- 现有 `CLAUDE.md` / `SPEC.md` / `docs/plans/*` / `docs/decisions/*` 都是面向**开发者 + Claude**的内部文档：信息密度高、术语多、按 milestone 时间线组织 — 不是给新人入门用的
+- M9 完成时项目结构会有较大变动（cmake → ament_cmake / colcon、新增 ROS2 依赖、新增 `udex_to_xhand_msgs/` 包、新增 `--no-ros` flag），任何更早写的 README 都会过时
+- README 的好坏决定「这份代码库交出去后还能不能被人复用」，是项目工程性收尾的一环
+
+**内容**:
+
+### M10a · 信息架构（0.1d）
+按以下结构定 README 章节，先列骨架与每节字数预算（总长 ≤ 800 行 / 中文 ≤ 1.5w 字）：
+1. **项目简介** — 一段话讲清楚做什么、给谁用、不做什么（拒做清单引用 SPEC §约束）
+2. **架构总览** — 一张 ASCII 数据流图（Windows UDCAP → UDP → PC2 ROS2 node → XHand + rosbag2）+ 模块一句话说明
+3. **前置准备** — 硬件清单（UDCAP 手套、两只 XHand、G1 PC2、网络拓扑）、操作系统、ROS2 distro、`/dev/ttyACM*` 权限
+4. **构建** — 系统依赖安装（apt 一行）、`colcon build` 全流程、常见编译错误
+5. **配置** — `config.yaml` 关键字段说明（左右手 serial port、mapping 不动、PID 默认值、watchdog 超时、ROS topic 命名）
+6. **运行 — 单手** — `ros2 run` 启动单手 + UDCAP 连接验证 + 视觉检验清单（5 指 + 握拳 + 张开）
+7. **运行 — 双手** — 双口枚举确认（ADR-042 教训：每次会话 re-probe）、双手 teleop、抓杯流程
+8. **数据采集** — `ros2 bag record` 完整命令、bag 路径规约、bag 读取脚本示例（Python `rosbag2_py` 读出 (state, action) pair）
+9. **安全** — Ctrl+C / SIGTERM 行为、watchdog 触发现象、clamp 触发现象、紧急停手
+10. **常见故障** — `permission denied /dev/ttyACM0`、UDP 收不到包、CRC 启动告警、双手 latency 异常、bag 写不进、师兄侧 dataloader 加载失败
+11. **二次开发指引** — 想改 mapping 改哪里、想加新 ROS topic 改哪里、SPEC.md / CLAUDE.md / ADR 体系怎么用、PR 流程
+12. **附录** — 关键 ADR 索引、log 归档路径约定、glossary（UDCAP / XHand / RS485 / CDC-ACM / `/clock`）
+
+### M10b · 内容编写（0.3d）
+- 每节按 §M10a 骨架落字。强制要求:
+  - **可复制即可运行**：所有命令必须能直接复制到 PC2 zsh 跑通，不留 `<placeholder>` 让读者猜
+  - **示例输出贴近实测**：每个命令配一段真实截取的预期 stdout（取自 `docs/logs/m*-*.log`），不写理想化伪输出
+  - **链 ADR 不复述 ADR**：决策细节链到 `docs/decisions/`，README 正文只讲「what / how to use」不讲「why we chose this」
+  - **故障定位走「症状 → 检查命令 → 修复」三段式**，不写发散建议
+- 截图 / 示意图: 至少一张 ASCII 架构图（在 §2）+ 一张 hardware 接线示意（PC2 USB 端口 / RS485 / UDCAP 网络）— ASCII 即可，不引入图床
+
+### M10c · 冷启动验证（0.1d）
+- 找一个**没参与开发的人**（同实验室同学 / 师兄 / 老师都行），让他/她从 git clone 开始照 README 跑：
+  - 全程不允许问作者，遇到问题只能查 README + ADR + log
+  - 目标动作：完成 M9 §M9e 的「60s 双手 teleop + 抓杯 + bag 落盘」
+- 跑通后采访: 哪一节最容易卡住？哪个命令的 expected output 与实际不符？哪个故障没在 §10 覆盖？
+- 回写 README 修复，至少覆盖被卡 ≥ 2 次的问题
+
+**完成定义**:
+- README.md 在仓库根目录，中文，章节按 M10a 骨架完整
+- 冷启动测试人独立从 clone 走到双手 teleop + bag 落盘成功，过程中不需要追问作者
+- README 内每个 bash 块都至少在一台 PC2 上实测过一次，不留死命令
+- 链接（到 ADR、SPEC、plan、log）全部有效（`grep -E '\]\([^)]+\)' README.md` 可一键校验）
+- 与 CLAUDE.md / SPEC.md 不冲突（不重复信息，只在 README 提概念 + 链过去看权威定义）
+
+```bash
+# M10c 冷启动验证脚本（验证人执行）
+cd /tmp && rm -rf udex_to_xhand
+git clone <repo-url> && cd udex_to_xhand
+# 从这里开始只能照 README 操作，遇到不懂的不能问作者
+# 验收: 60s 后 ros2 bag info /var/log/udex_to_xhand/teleop-* 输出 5 topic × ~6000 msg
+```
+
+**依赖**: M9（ROS2 数据流水线已落地）— README 的「数据采集」章节内容来源于 M9e 的实测命令；任何早于 M9 的 README 写法都会被 M9 改造作废
+
+**ADRs**: 无（文档工作不引入新架构决策；如冷启动发现 ADR 表述模糊需 backlink 修复，单独 PR）
+
+**Post-M10**:
+- 项目整体交付完成
+- CLAUDE.md 末尾加一行 `面向新人的入门文档见 README.md（不是 CLAUDE.md）`
+- 删除 / 归档过期的开发笔记（如有）
+
+---
+
 ## 依赖图
 
 ```
@@ -351,6 +550,16 @@ M0 (skeleton)
             └── M6 (safety hardening, C++)
             └── M7 (dual hand)
                 └── M8 (tuning + acceptance)
+                    └── M9 (ROS2 data logging)   ADR-043/044
+                        ├── M9a (ROS2 setup + senior alignment)
+                        ├── M9b (udex_to_xhand_msgs package)
+                        ├── M9c (udex_to_xhand → ROS2 node)
+                        ├── M9d (latency regression)
+                        └── M9e (rosbag record + cup-pickup acceptance)
+                            └── M10 (Chinese README, project handoff)
+                                ├── M10a (info architecture)
+                                ├── M10b (content writing)
+                                └── M10c (cold-start validation)
 ```
 
 ## 时间估算
@@ -366,5 +575,7 @@ M0 (skeleton)
 | M6 Safety (C++)        | 0.5d | 5.5d |
 | M7 Dual Hand           | 0.5d | 6d   |
 | M8 Tuning + Acceptance | 1d   | 7d   |
+| M9 ROS2 Data Logging   | 2d   | 9d   |
+| M10 Chinese README     | 0.5d | 9.5d |
 
-M1 和 M3 无依赖关系，可并行。最快路径: **7 天** (M5 因厂商仅提供 C++ SDK，含 M5a 原生验证 / M5b 项目 C++ 化 / M5c PC2 验收 三个子阶段，工期从 0.5d 升到 2d)。
+M1 和 M3 无依赖关系，可并行。最快路径: **9.5 天** (M5 因厂商仅提供 C++ SDK 拆 M5a/b/c 工期 2d；M9 因引入 ROS2 + msg 包 + CMake 改造 + latency 回归 + 录制验收拆 M9a-e 工期 2d；M10 中文 README 含冷启动验证 0.5d)。
