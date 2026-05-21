@@ -47,30 +47,72 @@ xhand:
 mapping:
   # M8 retarget master switch (required; M8a Step A.0). false = M7 baseline
   # mapping; true = M8 four-finger affine rescale + thumb retargeting.
-  use_new_retarget: false
+  #
+  # 2026-05-21 first M8a/M8b calibration round (logs in docs/logs/m8a-*):
+  #   - input_range values are the per-joint pre-clamp min/max captured by
+  #     --actions calibrate-udcap (operator script: 5s palm-open / 5s neutral /
+  #     3s × 5-finger max-flex / 5s full fist on each hand).
+  #   - output_range is *intentionally conservative* — every four-finger
+  #     joint's output_range[1] is 10° to 25° below its clamp[1] so the
+  #     XHand never sits on the joint-limit cliff. Per-joint lift is +7° to
+  #     +12° vs M7 baseline output (well under the user-set cap of
+  #     "几度到十几度" / 2026-05-21).
+  #   - clamp values are UNCHANGED from M5b/M6/M7. Safety envelope identical
+  #     to what was validated through M5c / M7 acceptance, so the verify
+  #     guard scripts/verify_flag_false_byte_identical.sh continues to pass
+  #     without re-freezing tests/fixtures/mapper_baseline_m7_frozen.json.
+  #   - thumb_bend + thumb_rota1 are deliberately left as M7 baseline (no
+  #     input_range/output_range). Only thumb_rota2 carries the M8 change
+  #     because the operator feedback isolated the "thumb stuck on the side
+  #     of the hand" issue to that axis (MCP Roll opposition); other thumb
+  #     joints will be revisited if Phase 4 visual verify still shows misfit.
+  #   - thumb_rota2 output_range[0]=15 is the "initial offset toward palm"
+  #     requested by the operator — at UDCAP l20=0 (no opposition input)
+  #     the XHand sits 15° toward palm instead of the M7 0°. output_range[1]
+  #     is held at 50, equal to M7 clamp[1], so the upper envelope is
+  #     unchanged and only the bias shifts.
+  use_new_retarget: true
   left:
     thumb_bend:    { sources: [0, 1, 2], weights: [0.3, 0.3, 0.4], sign: -1, offset: 0, clamp: [-10, 110] }
     thumb_rota1:   { sources: [3],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 110] }
-    thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 50] }
+    thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 50],
+                     input_range: [-1.00, 41.00], output_range: [15, 50] }
     index_bend:    { sources: [7],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 30] }
-    index_joint1:  { sources: [6],       weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
-    index_joint2:  { sources: [5, 4],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
-    mid_joint1:    { sources: [10],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
-    mid_joint2:    { sources: [9, 8],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
-    ring_joint1:   { sources: [14],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
-    ring_joint2:   { sources: [13, 12],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
-    pinky_joint1:  { sources: [18],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
-    pinky_joint2:  { sources: [17, 16],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
+    index_joint1:  { sources: [6],       weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 80.00], output_range: [0, 92] }
+    index_joint2:  { sources: [5, 4],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 92.00], output_range: [0, 100] }
+    mid_joint1:    { sources: [10],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 80.00], output_range: [0, 92] }
+    mid_joint2:    { sources: [9, 8],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 92.00], output_range: [0, 100] }
+    ring_joint1:   { sources: [14],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.60, 80.00], output_range: [0, 92] }
+    ring_joint2:   { sources: [13, 12],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 92.00], output_range: [0, 100] }
+    pinky_joint1:  { sources: [18],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 75.20], output_range: [0, 85] }
+    pinky_joint2:  { sources: [17, 16],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 85.30], output_range: [0, 92] }
   right:
     thumb_bend:    { sources: [0, 1, 2], weights: [0.3, 0.3, 0.4], sign: -1, offset: 0, clamp: [-10, 110] }
     thumb_rota1:   { sources: [3],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 110] }
-    thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 50] }
+    thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 50],
+                     input_range: [-1.00, 41.00], output_range: [15, 50] }
     index_bend:    { sources: [7],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 30] }
-    index_joint1:  { sources: [6],       weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
-    index_joint2:  { sources: [5, 4],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
-    mid_joint1:    { sources: [10],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
-    mid_joint2:    { sources: [9, 8],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
-    ring_joint1:   { sources: [14],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
-    ring_joint2:   { sources: [13, 12],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
-    pinky_joint1:  { sources: [18],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110] }
-    pinky_joint2:  { sources: [17, 16],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110] }
+    index_joint1:  { sources: [6],       weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 80.00], output_range: [0, 92] }
+    index_joint2:  { sources: [5, 4],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 92.00], output_range: [0, 100] }
+    mid_joint1:    { sources: [10],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 80.00], output_range: [0, 92] }
+    mid_joint2:    { sources: [9, 8],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 92.00], output_range: [0, 100] }
+    ring_joint1:   { sources: [14],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 80.00], output_range: [0, 92] }
+    ring_joint2:   { sources: [13, 12],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 92.00], output_range: [0, 100] }
+    pinky_joint1:  { sources: [18],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 75.20], output_range: [0, 85] }
+    pinky_joint2:  { sources: [17, 16],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
+                     input_range: [0.00, 85.30], output_range: [0, 92] }
