@@ -25,6 +25,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "calibrate_udcap.hpp"
 #include "cli.hpp"
 #include "joint_mapper.hpp"
 #include "logging.hpp"
@@ -257,6 +258,165 @@ int run_actions(const cli::Args& args, const XHandConfig& xc) {
 
 }  // namespace
 
+// M8a Step A.3 — calibrate-udcap mode implementation. External linkage so it
+// can be called from main(); declared in calibrate_udcap.hpp.
+//
+// Loop body deliberately mirrors the FULL mode skeleton (try_recv at 100 Hz,
+// safety::install_signal_handlers, calib==3 gate handled inside try_recv).
+// The mapper is constructed but its apply_one() is intentionally NOT used —
+// we replay weighted+sign+offset directly so the captured value is the
+// degree-domain pre-clamp number that the operator pastes back as input_range.
+int run_calibrate_udcap(const cli::Args& args) {
+    YAML::Node root;
+    try {
+        root = YAML::LoadFile(args.config_path);
+    } catch (const std::exception& e) {
+        LOG_ERROR("calibrate-udcap requires --config: " << e.what());
+        return 2;
+    }
+
+    // Reuse the same loader the FULL mode uses so udcap.host / port / etc.
+    // come from a single source.
+    UdcapConfig udcap_cfg = load_udcap_config(root);
+
+    // JointMapper enforces mapping.use_new_retarget presence — calibration
+    // does not care about the flag's value (it never calls map_left/right),
+    // but the schema check catches a missing flag early.
+    JointMapper mapper(args.config_path);
+
+    std::optional<UdcapReceiver> receiver;
+    try {
+        receiver.emplace(udcap_cfg.host, static_cast<uint16_t>(udcap_cfg.port));
+    } catch (const std::exception& e) {
+        LOG_ERROR("UdcapReceiver: " << e.what());
+        return 2;
+    }
+
+    const bool want_left  = (args.hand != cli::HandSelect::Right);
+    const bool want_right = (args.hand != cli::HandSelect::Left);
+
+    std::atomic<bool> shutdown_flag{false};
+    safety::install_signal_handlers(shutdown_flag);
+
+    CalibStats stats{};
+
+    using namespace std::chrono;
+    const auto loop_start = steady_clock::now();
+    const auto deadline   = loop_start +
+        microseconds(static_cast<long long>(args.calibrate_duration * 1'000'000.0));
+    const auto period     = microseconds(10'000);   // 100 Hz, same as FULL mode
+    auto next_tick        = loop_start;
+    auto next_progress    = loop_start + seconds(5);
+    bool first_packet_logged = false;
+
+    LOG_INFO("calibrate-udcap: capturing for "
+             << std::fixed << std::setprecision(1) << args.calibrate_duration
+             << "s on " << udcap_cfg.host << ":" << udcap_cfg.port
+             << " (hand="
+             << (args.hand == cli::HandSelect::Left  ? "left"
+                : args.hand == cli::HandSelect::Right ? "right" : "both")
+             << ")");
+    LOG_INFO("operator script: 5s palm-open, 5s neutral, then 3s max-flex "
+             "per finger (thumb/index/mid/ring/pinky), then 5s full fist");
+
+    // Hot loop. Stats update math (lines below) mirrors apply_one's pre-clamp
+    // section exactly so the captured ranges are directly compatible with
+    // the M8b input_range field.
+    auto record_hand = [&](const std::array<double, 24>& src,
+                           std::array<MinMax, 24>& src_stats,
+                           const std::array<JointConfig, 12>& cfg,
+                           std::array<MinMax, 12>& joint_stats,
+                           long& frame_counter) {
+        for (size_t i = 0; i < 24; ++i) src_stats[i].update(src[i]);
+        for (size_t j = 0; j < 12; ++j) {
+            const auto& jc = cfg[j];
+            double acc = 0.0;
+            for (size_t i = 0; i < jc.sources.size(); ++i) {
+                acc += jc.weights[i] * src[jc.sources[i]];
+            }
+            const double deg = static_cast<double>(jc.sign) * acc + jc.offset;
+            joint_stats[j].update(deg);
+        }
+        ++frame_counter;
+    };
+
+    while (!shutdown_flag.load()) {
+        const auto now = steady_clock::now();
+        if (now >= deadline) break;
+
+        if (auto f = receiver->try_recv()) {
+            if (!first_packet_logged) {
+                LOG_INFO("first packet from " << receiver->last_sender_ip());
+                first_packet_logged = true;
+            }
+            if (want_left)  record_hand(f->l, stats.left_src,
+                                         mapper.left_config(),  stats.left_joint,
+                                         stats.frames_left);
+            if (want_right) record_hand(f->r, stats.right_src,
+                                         mapper.right_config(), stats.right_joint,
+                                         stats.frames_right);
+        }
+
+        if (now >= next_progress) {
+            const double elapsed = duration<double>(now - loop_start).count();
+            LOG_INFO("calibrate: elapsed=" << std::fixed << std::setprecision(1)
+                     << elapsed << "s  frames_left=" << stats.frames_left
+                     << "  frames_right=" << stats.frames_right);
+            next_progress = now + seconds(5);
+        }
+
+        next_tick += period;
+        std::this_thread::sleep_until(next_tick);
+    }
+
+    // Dump YAML fragment to stdout. Format mirrors the per-joint entry shape
+    // in config.yaml so it can be pasted under mapping.<hand>.<joint>.
+    auto dump_fragment = [&](const char* hand_label,
+                             const std::array<MinMax, 24>& src_stats,
+                             const std::array<MinMax, 12>& joint_stats,
+                             long frame_count) {
+        std::cout << "# ----- " << hand_label
+                  << " (" << frame_count << " frames) -----\n";
+        std::cout << "# 24 source min/max (sanity check; should each have "
+                  << "max-min >= 30deg after the full operator script):\n";
+        for (size_t i = 0; i < 24; ++i) {
+            std::cout << "#   " << hand_label[0] << i
+                      << ":  [" << std::fixed << std::setprecision(2)
+                      << src_stats[i].mn << ", " << src_stats[i].mx << "]"
+                      << (src_stats[i].has_data ? "" : "  (NO DATA)")
+                      << "\n";
+        }
+        std::cout << "# Paste under mapping." << hand_label << ".<joint>:\n";
+        for (size_t j = 0; j < 12; ++j) {
+            std::cout << "#   " << JointMapper::kJointOrder[j]
+                      << ":  input_range: ["
+                      << std::fixed << std::setprecision(2)
+                      << joint_stats[j].mn << ", " << joint_stats[j].mx << "]"
+                      << (joint_stats[j].has_data ? "" : "  # NO DATA")
+                      << "\n";
+        }
+    };
+
+    std::cout << "# ===== calibrate-udcap result =====\n"
+              << "# duration=" << args.calibrate_duration << "s "
+              << "frames_left=" << stats.frames_left << " "
+              << "frames_right=" << stats.frames_right << "\n"
+              << "# (paste the relevant blocks into config.yaml; for M8b only\n"
+              << "#  the 9 four-finger joints are needed; thumb_bend / thumb_rota1\n"
+              << "#  / thumb_rota2 ranges are still useful as M8c reference)\n";
+    if (want_left)  dump_fragment("left",  stats.left_src,  stats.left_joint,  stats.frames_left);
+    if (want_right) dump_fragment("right", stats.right_src, stats.right_joint, stats.frames_right);
+
+    if ((want_left  && stats.frames_left  == 0) ||
+        (want_right && stats.frames_right == 0)) {
+        LOG_ERROR("calibrate-udcap: 0 frames captured for requested hand(s); "
+                  "check UDCAP is running and CalibrationStatus == 3");
+        return 2;
+    }
+    LOG_INFO("calibrate-udcap: done");
+    return 0;
+}
+
 int main(int argc, char** argv) {
     cli::Args args;
     try {
@@ -272,6 +432,13 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (args.actions) {
+        // M8a Step A.3: calibrate-udcap branches off before the preset path
+        // because it needs the full config (udcap + mapping sections) and
+        // does NOT open the XHand. It is the only `--actions` value that is
+        // not a comma-separated preset list.
+        if (args.is_calibrate_udcap()) {
+            return run_calibrate_udcap(args);
+        }
         // M5c: actions mode tolerates missing/invalid config — defaults + --port
         // are sufficient to drive the XHand. Plan §3.2.
         YAML::Node root;

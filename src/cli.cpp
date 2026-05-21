@@ -16,7 +16,10 @@ void print_usage(std::ostream& os, const char* prog) {
        << "  --hand <left|right|both>   Which hand(s) to drive (default: both)\n"
        << "  --port <path>              Override xhand.serial_port from config\n"
        << "  --actions <names>          Comma-separated preset names (fist,palm,v,ok) — M3 equiv\n"
+       << "                             Single token 'calibrate-udcap' enters M8a calibration mode\n"
        << "  --hold <sec>               Per-preset hold (default: 1.0); only with --actions\n"
+       << "  --calibrate-duration <s>   M8a calibration window (default: 30);\n"
+       << "                             only with --actions calibrate-udcap\n"
        << "  --help, -h                 Print this message and exit\n";
 }
 
@@ -31,6 +34,7 @@ Args parse(int argc, char** argv) {
     Args a;
     bool hold_seen = false;
     bool duration_seen = false;
+    bool calibrate_duration_seen = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string f = argv[i];
@@ -58,6 +62,9 @@ Args parse(int argc, char** argv) {
         } else if (f == "--hold") {
             a.hold = std::stod(next_value(argc, argv, i, f));
             hold_seen = true;
+        } else if (f == "--calibrate-duration") {
+            a.calibrate_duration = std::stod(next_value(argc, argv, i, f));
+            calibrate_duration_seen = true;
         } else {
             throw std::runtime_error("Unknown flag: " + f);
         }
@@ -74,10 +81,25 @@ Args parse(int argc, char** argv) {
     }
     if (a.actions && duration_seen) {
         throw std::runtime_error("--actions and --duration are mutually exclusive "
-                                  "(actions total time is N × --hold)");
+                                  "(actions total time is N × --hold; for calibrate-udcap use --calibrate-duration)");
     }
     if (hold_seen && !a.actions) {
         throw std::runtime_error("--hold is only valid with --actions");
+    }
+    // M8a Step A.1: calibrate-udcap mutex / preset compatibility.
+    if (calibrate_duration_seen && !a.is_calibrate_udcap()) {
+        throw std::runtime_error("--calibrate-duration is only valid with --actions calibrate-udcap");
+    }
+    if (a.is_calibrate_udcap()) {
+        if (hold_seen) {
+            throw std::runtime_error("--hold is meaningless with --actions calibrate-udcap; "
+                                      "use --calibrate-duration");
+        }
+        if (a.calibrate_duration <= 0.0) {
+            throw std::runtime_error("--calibrate-duration must be > 0");
+        }
+        // --mock / --receiver-only / --duration already excluded above by the
+        // generic --actions guards. --port is allowed but ignored (XHand not opened).
     }
 
     return a;
