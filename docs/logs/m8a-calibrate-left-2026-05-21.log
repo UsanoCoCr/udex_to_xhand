@@ -1,0 +1,54 @@
+[INFO] UDP bound 0.0.0.0:9000
+[INFO] calibrate-udcap: capturing for 30.0s on 0.0.0.0:9000 (hand=left)
+[INFO] operator script: 5s palm-open, 5s neutral, then 3s max-flex per finger (thumb/index/mid/ring/pinky), then 5s full fist
+[INFO] first packet from 192.168.3.24
+[INFO] calibrate: elapsed=5.0s  frames_left=308  frames_right=0
+[INFO] calibrate: elapsed=10.0s  frames_left=617  frames_right=0
+[INFO] calibrate: elapsed=15.0s  frames_left=926  frames_right=0
+[INFO] calibrate: elapsed=20.0s  frames_left=1235  frames_right=0
+[INFO] calibrate: elapsed=25.0s  frames_left=1546  frames_right=0
+# ===== calibrate-udcap result =====
+# duration=30s frames_left=1854 frames_right=0
+# (paste the relevant blocks into config.yaml; for M8b only
+#  the 9 four-finger joints are needed; thumb_bend / thumb_rota1
+#  / thumb_rota2 ranges are still useful as M8c reference)
+# ----- left (1854 frames) -----
+# 24 source min/max (sanity check; should each have max-min >= 30deg after the full operator script):
+#   l0:  [-60.00, 0.00]
+#   l1:  [-60.00, 4.00]
+#   l2:  [-60.00, 19.00]
+#   l3:  [-22.80, 25.00]
+#   l4:  [-80.00, 0.00]
+#   l5:  [-100.00, 0.00]
+#   l6:  [-80.00, 0.00]
+#   l7:  [-25.00, 0.00]
+#   l8:  [-80.00, 0.00]
+#   l9:  [-100.00, 0.00]
+#   l10:  [-80.00, 0.00]
+#   l11:  [-2.30, 2.00]
+#   l12:  [-80.00, 0.00]
+#   l13:  [-100.00, 0.00]
+#   l14:  [-80.00, -0.60]
+#   l15:  [0.00, 15.00]
+#   l16:  [-74.20, 0.00]
+#   l17:  [-92.70, 0.00]
+#   l18:  [-75.20, 0.00]
+#   l19:  [0.00, 35.00]
+#   l20:  [-1.00, 41.00]
+#   l21:  [0.00, 0.00]
+#   l22:  [0.00, 0.00]
+#   l23:  [-1.00, -1.00]
+# Paste under mapping.left.<joint>:
+#   thumb_bend:  input_range: [-8.80, 60.00]
+#   thumb_rota1:  input_range: [-25.00, 22.80]
+#   thumb_rota2:  input_range: [-1.00, 41.00]
+#   index_bend:  input_range: [0.00, 25.00]
+#   index_joint1:  input_range: [0.00, 80.00]
+#   index_joint2:  input_range: [0.00, 92.00]
+#   mid_joint1:  input_range: [0.00, 80.00]
+#   mid_joint2:  input_range: [0.00, 92.00]
+#   ring_joint1:  input_range: [0.60, 80.00]
+#   ring_joint2:  input_range: [0.00, 92.00]
+#   pinky_joint1:  input_range: [0.00, 75.20]
+#   pinky_joint2:  input_range: [0.00, 85.30]
+[INFO] calibrate-udcap: done

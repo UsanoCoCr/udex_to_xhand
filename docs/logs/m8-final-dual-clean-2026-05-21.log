@@ -1,0 +1,18 @@
+[INFO] config loaded: ../config.yaml
+[INFO] mode: FULL (UDP + XHand)
+[INFO] UDP bound 0.0.0.0:9000
+try open device times: 1 / 3 
+Start reading data from serial port
+[INFO] XHand SDK version: 1.4.3
+[INFO] Serial: /dev/ttyACM0 @ 3000000 baud
+[INFO] hand_id=1 type=Left
+try open device times: 1 / 3 
+Start reading data from serial port
+[INFO] XHand SDK version: 1.4.3
+[INFO] Serial: /dev/ttyACM2 @ 3000000 baud
+[INFO] hand_id=0 type=Right
+[INFO] waiting for first calibrated UDP frame (timeout=10s)...
+[INFO] first packet from 192.168.3.24
+[WARN] send_command(hand_id=1): 1501070 Communication data CRC error
+[WARN] send_command(hand_id=1): 1501070 Communication data CRC error
+[WARN] send_command(hand_id=1): 1501070 Communication data CRC error

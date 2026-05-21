@@ -1,0 +1,42 @@
+Consolidate compiler generated dependencies of target test_safety
+Consolidate compiler generated dependencies of target test_mapper_snapshot
+Consolidate compiler generated dependencies of target udex_to_xhand
+[ 14%] Building CXX object CMakeFiles/test_safety.dir/tests/test_safety.cpp.o
+[ 14%] Building CXX object CMakeFiles/test_safety.dir/src/safety.cpp.o
+[ 28%] Building CXX object CMakeFiles/test_mapper_snapshot.dir/tests/test_mapper_snapshot.cpp.o
+[ 28%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/main.cpp.o
+In file included from /home/unitree/udex_to_xhand/src/main.cpp:28:
+/home/unitree/udex_to_xhand/src/calibrate_udcap.hpp:10:1: warning: multi-line comment [-Wcomment]
+   10 | // Usage: ./udex_to_xhand --actions calibrate-udcap [--calibrate-duration N] \
+      | ^
+[ 35%] Building CXX object CMakeFiles/test_mapper_snapshot.dir/src/joint_mapper.cpp.o
+[ 42%] Linking CXX executable test_safety
+[ 42%] Built target test_safety
+[ 50%] Building CXX object CMakeFiles/test_mapper_snapshot.dir/src/udcap_receiver.cpp.o
+In file included from /usr/include/c++/11/utility:70,
+                 from /usr/include/c++/11/array:38,
+                 from /home/unitree/udex_to_xhand/src/joint_mapper.hpp:3,
+                 from /home/unitree/udex_to_xhand/src/joint_mapper.cpp:1:
+/usr/include/c++/11/bits/stl_pair.h: In instantiation of ‘constexpr std::pair<typename std::__strip_reference_wrapper<typename std::decay<_Tp>::type>::__type, typename std::__strip_reference_wrapper<typename std::decay<_Tp2>::type>::__type> std::make_pair(_T1&&, _T2&&) [with _T1 = double&; _T2 = double&; typename std::__strip_reference_wrapper<typename std::decay<_Tp2>::type>::__type = double; typename std::decay<_Tp2>::type = double; typename std::__strip_reference_wrapper<typename std::decay<_Tp>::type>::__type = double; typename std::decay<_Tp>::type = double]’:
+/home/unitree/udex_to_xhand/src/joint_mapper.cpp:97:44:   required from here
+/usr/include/c++/11/bits/stl_pair.h:567:5: note: parameter passing for argument of type ‘std::pair<double, double>’ when C++17 is enabled changed to match C++14 in GCC 10.1
+  567 |     make_pair(_T1&& __x, _T2&& __y)
+      |     ^~~~~~~~~
+[ 57%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/cli.cpp.o
+[ 64%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/udcap_receiver.cpp.o
+[ 71%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/joint_mapper.cpp.o
+[ 78%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/xhand_driver.cpp.o
+In file included from /usr/include/c++/11/utility:70,
+                 from /usr/include/c++/11/array:38,
+                 from /home/unitree/udex_to_xhand/src/joint_mapper.hpp:3,
+                 from /home/unitree/udex_to_xhand/src/joint_mapper.cpp:1:
+/usr/include/c++/11/bits/stl_pair.h: In instantiation of ‘constexpr std::pair<typename std::__strip_reference_wrapper<typename std::decay<_Tp>::type>::__type, typename std::__strip_reference_wrapper<typename std::decay<_Tp2>::type>::__type> std::make_pair(_T1&&, _T2&&) [with _T1 = double&; _T2 = double&; typename std::__strip_reference_wrapper<typename std::decay<_Tp2>::type>::__type = double; typename std::decay<_Tp2>::type = double; typename std::__strip_reference_wrapper<typename std::decay<_Tp>::type>::__type = double; typename std::decay<_Tp>::type = double]’:
+/home/unitree/udex_to_xhand/src/joint_mapper.cpp:97:44:   required from here
+/usr/include/c++/11/bits/stl_pair.h:567:5: note: parameter passing for argument of type ‘std::pair<double, double>’ when C++17 is enabled changed to match C++14 in GCC 10.1
+  567 |     make_pair(_T1&& __x, _T2&& __y)
+      |     ^~~~~~~~~
+[ 85%] Linking CXX executable test_mapper_snapshot
+[ 85%] Built target test_mapper_snapshot
+[ 92%] Building CXX object CMakeFiles/udex_to_xhand.dir/src/safety.cpp.o
+[100%] Linking CXX executable udex_to_xhand
+[100%] Built target udex_to_xhand
