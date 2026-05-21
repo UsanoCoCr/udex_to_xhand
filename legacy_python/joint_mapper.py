@@ -22,12 +22,26 @@ JOINT_ORDER = (
 
 class JointMapper:
     def __init__(self, config: dict):
-        # config is mapping section: {"left": {...}, "right": {...}}
+        # config is the mapping section:
+        #   {"use_new_retarget": bool, "left": {...}, "right": {...}}
+        # M8a Step A.0: must read the master switch first so it does not
+        # leak into the per-hand iteration below. Required field — explicit
+        # `false` is the M7-baseline setting; missing key raises so a config
+        # regression can never silently fall back to M7.
+        if "use_new_retarget" not in config:
+            raise KeyError(
+                "mapping.use_new_retarget required "
+                "(set to false to keep M7 baseline; true enables M8 retarget pipeline)"
+            )
+        self.use_new_retarget: bool = bool(config["use_new_retarget"])
+
         # Pre-build specs per hand for fast hot-path access.
         # Each spec: (sources, weights, sign, offset, clamp_lo, clamp_hi)
         self._specs: dict[str, list[tuple]] = {}
 
         for hand, hand_cfg in config.items():
+            if hand == "use_new_retarget":
+                continue  # already consumed above
             specs = []
             for i, joint_name in enumerate(JOINT_ORDER):
                 if joint_name not in hand_cfg:
@@ -54,6 +68,37 @@ class JointMapper:
                             f"source index {s} out of range [0, 23]"
                         )
 
+                # M8b Step B.4: optional affine rescale fields. Both-or-none
+                # schema check happens regardless of use_new_retarget so a
+                # config-only typo still fails fast. Flag-gating then strips
+                # both entries when use_new_retarget=False so the M7 path is
+                # bit-identical, matching joint_mapper.cpp load_hand.
+                input_range = entry.get("input_range")
+                output_range = entry.get("output_range")
+                if (input_range is None) != (output_range is None):
+                    raise ValueError(
+                        f"mapping.{hand}.{joint_name}: "
+                        f"input_range and output_range must be both present or both absent"
+                    )
+                if input_range is not None:
+                    if len(input_range) != 2:
+                        raise ValueError(
+                            f"mapping.{hand}.{joint_name}.input_range "
+                            f"must have exactly 2 elements"
+                        )
+                    if len(output_range) != 2:
+                        raise ValueError(
+                            f"mapping.{hand}.{joint_name}.output_range "
+                            f"must have exactly 2 elements"
+                        )
+                if not self.use_new_retarget:
+                    input_range = None
+                    output_range = None
+                in_min  = float(input_range[0])  if input_range  is not None else None
+                in_max  = float(input_range[1])  if input_range  is not None else None
+                out_min = float(output_range[0]) if output_range is not None else None
+                out_max = float(output_range[1]) if output_range is not None else None
+
                 specs.append((
                     tuple(sources),
                     tuple(weights),
@@ -61,6 +106,10 @@ class JointMapper:
                     float(offset),
                     float(clamp_range[0]),
                     float(clamp_range[1]),
+                    in_min,
+                    in_max,
+                    out_min,
+                    out_max,
                 ))
             self._specs[hand] = specs
 
@@ -73,11 +122,23 @@ class JointMapper:
             )
         specs = self._specs[hand]
         result = []
-        for sources, weights, sign, offset, lo, hi in specs:
+        for (sources, weights, sign, offset, lo, hi,
+             in_min, in_max, out_min, out_max) in specs:
             wsum = 0.0
             for s, w in zip(sources, weights):
                 wsum += w * udcap_24[s]
             deg = sign * wsum + offset
+            # M8b Step B.4: optional affine rescale, identical arithmetic
+            # order to joint_mapper.cpp::apply_one. When use_new_retarget
+            # was False the loader already nulled the bounds → branch skipped
+            # and output is bit-identical to the M7 path.
+            if in_min is not None:
+                span = in_max - in_min
+                if span > 1e-9:
+                    ratio = (deg - in_min) / span
+                    deg = ratio * (out_max - out_min) + out_min
+                else:
+                    deg = (out_min + out_max) * 0.5
             deg = max(lo, min(hi, deg))
             result.append(deg * _DEG2RAD)
         return result

@@ -30,6 +30,10 @@ xhand:
 # offset: degrees, added after weighted sum
 # clamp: [min_deg, max_deg] before deg→rad conversion
 #
+# M8 (Step A.0): optional per-joint fields `input_range` + `output_range`
+# (both-or-none) enable an affine rescale between weighted-sum+sign+offset
+# and clamp+deg→rad. Only applied when mapping.use_new_retarget == true.
+#
 # UDCAP layout (official, DIP→PIP→MCP per finger):
 #   Thumb:  l0=DIP, l1=PIP, l2=MCP Pitch, l3=MCP Yaw, l20=MCP Roll
 #   Index:  l4=DIP, l5=PIP, l6=MCP Pitch, l7=MCP Yaw, l21=MCP Roll
@@ -41,6 +45,9 @@ xhand:
 # Discarded (no XHand DOF): l11 (mid yaw), l15 (ring yaw), l19 (pinky yaw),
 #                            l21 (index roll), l22 (pinky roll), l23 (gesture)
 mapping:
+  # M8 retarget master switch (required; M8a Step A.0). false = M7 baseline
+  # mapping; true = M8 four-finger affine rescale + thumb retargeting.
+  use_new_retarget: false
   left:
     thumb_bend:    { sources: [0, 1, 2], weights: [0.3, 0.3, 0.4], sign: -1, offset: 0, clamp: [-10, 110] }
     thumb_rota1:   { sources: [3],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 110] }
