@@ -101,9 +101,39 @@ mapping:
   #   thumb_bend + thumb_rota1 still untouched. If round 3 visual verify
   #   still shows poor pinch / thumb misalignment, the next axis to tune
   #   is thumb_bend (URDF upper = 104.97°, plenty of room).
+  #
+  # 2026-05-25 round 4 (this commit) — thumb_bend offset hypothesis:
+  #   Round 3 lifted thumb_rota2 clamp to [0, 90] (URDF physical max) and
+  #   pushed initial bias to 40°. PC2 visual verify: thumb still "明显在
+  #   手侧面", and "没有明显变化" between rounds 2 and 3. Two readings:
+  #     (a) rota2 is correctly the opposition axis (ADR-013) but 40° isn't
+  #         enough — need to push output_range[0] further (e.g., 60–75°).
+  #     (b) rota2 may not actually swing the thumb across the palm in the
+  #         user-perceived sense; the visible "thumb on side" issue is
+  #         because thumb_bend sits at 0° at rest (UDCAP l0=l1=l2≈0 at
+  #         open palm → weighted+sign = 0 → bend command 0° → thumb base
+  #         extended straight out to the side; opposition rotation alone
+  #         doesn't reposition the base).
+  #   Round 4 tests hypothesis (b) without backing off (a):
+  #     - thumb_bend (L+R): add input_range [0, 60] + output_range
+  #       [40, 100]. At rest the thumb_bend axis is commanded to 40°
+  #       (M7: 0°), so the thumb base pre-flexes 40° toward the palm
+  #       regardless of UDCAP curl input. At full UDCAP curl
+  #       (weighted+sign ≈ 60) command reaches 100° (M7: 60°). Whole
+  #       response curve shifted +40° while still mapping the full
+  #       UDCAP range. This is "operator-requested initial offset" =
+  #       the `output_range[0]` knob, kept inside the affine-only
+  #       mechanism so flag=false stays byte-identical (clamp/offset/
+  #       sign untouched).
+  #     - thumb_rota2 unchanged at [40, 90]. If round 4 visual verify
+  #       shows the thumb visibly swung in but twisted unnaturally,
+  #       reduce thumb_rota2 output_range[0] in round 5.
+  #   thumb_rota1 still untouched (l3 input is small / clamps quickly,
+  #   no clear lever).
   use_new_retarget: true
   left:
-    thumb_bend:    { sources: [0, 1, 2], weights: [0.3, 0.3, 0.4], sign: -1, offset: 0, clamp: [-10, 110] }
+    thumb_bend:    { sources: [0, 1, 2], weights: [0.3, 0.3, 0.4], sign: -1, offset: 0, clamp: [-10, 110],
+                     input_range: [0, 60], output_range: [40, 100] }
     thumb_rota1:   { sources: [3],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 110] }
     thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 90],
                      input_range: [-1.00, 41.00], output_range: [40, 90] }
@@ -125,7 +155,8 @@ mapping:
     pinky_joint2:  { sources: [17, 16],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
                      input_range: [0.00, 77.00], output_range: [0, 110] }
   right:
-    thumb_bend:    { sources: [0, 1, 2], weights: [0.3, 0.3, 0.4], sign: -1, offset: 0, clamp: [-10, 110] }
+    thumb_bend:    { sources: [0, 1, 2], weights: [0.3, 0.3, 0.4], sign: -1, offset: 0, clamp: [-10, 110],
+                     input_range: [0, 60], output_range: [40, 100] }
     thumb_rota1:   { sources: [3],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 110] }
     thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 90],
                      input_range: [-1.00, 41.00], output_range: [40, 90] }
