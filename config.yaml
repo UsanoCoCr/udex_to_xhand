@@ -13,7 +13,7 @@ xhand:
   # drifted within hours of plan-write. Re-probe + update on every reboot
   # or USB replug per plan rev2 §10.2.3 / ADR-042.
   left_serial_port:  "/dev/ttyACM2"
-  right_serial_port: "/dev/ttyACM0"
+  right_serial_port: "/dev/ttyACM2"
   baud_rate: 3000000
   control_mode: 3          # 0=passive, 3=position, 5=force
   default_kp: 100
@@ -162,8 +162,8 @@ mapping:
     thumb_bend:    { sources: [0, 1, 2], weights: [0.3, 0.3, 0.4], sign: -1, offset: 0, clamp: [-10, 110],
                      input_range: [0, 60], output_range: [0, 105] }
     thumb_rota1:   { sources: [3],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 110] }
-    thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 90],
-                     input_range: [-1.00, 41.00], output_range: [40, 90] }
+    thumb_rota2:   { sources: [20],      weights: [0.7],            sign:  1, offset: 0, clamp: [-10, 90],
+                     input_range: [-1.00, 41.00], output_range: [0, 90] }
     index_bend:    { sources: [7],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 30] }
     index_joint1:  { sources: [6],       weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
                      input_range: [0.00, 72.00], output_range: [0, 110] }
@@ -185,8 +185,8 @@ mapping:
     thumb_bend:    { sources: [0, 1, 2], weights: [0.3, 0.3, 0.4], sign: -1, offset: 0, clamp: [-10, 110],
                      input_range: [0, 60], output_range: [0, 105] }
     thumb_rota1:   { sources: [3],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 110] }
-    thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 90],
-                     input_range: [-1.00, 41.00], output_range: [40, 90] }
+    thumb_rota2:   { sources: [20],      weights: [0.7],            sign:  1, offset: 0, clamp: [-10, 90],
+                     input_range: [-1.00, 41.00], output_range: [0, 90] }
     index_bend:    { sources: [7],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 30] }
     index_joint1:  { sources: [6],       weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
                      input_range: [0.00, 72.00], output_range: [0, 110] }
