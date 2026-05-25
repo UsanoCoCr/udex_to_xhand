@@ -57,67 +57,92 @@ mapping:
   # path-A-runbook proposal, still expressed within the affine-only mechanism
   # so scripts/verify_flag_false_byte_identical.sh keeps passing.
   #
-  # 2026-05-25 second round (this commit):
-  #   - input_range UNCHANGED (same M8a calibration capture, logs m8a-*).
-  #   - output_range[1] for all 8 four-finger joint1/joint2 pushed to 110 =
-  #     clamp[1] = physical limit (plan §25: "沿用现有 clamp 值，行程 = 物理极限").
-  #     Index/mid/ring/pinky joint1 + joint2 all 110. This puts the XHand on
-  #     the joint-limit cliff at max UDCAP input — acceptable trade for
-  #     full palm closure per operator decision; if PID stalls / chatters,
-  #     fall back to 108 or M8b values (commit 8262593).
-  #   - thumb_rota2 output_range = [30, 50]: initial bias toward palm doubled
-  #     from 15° → ~30.5° at UDCAP l20=0 (cf. M8b runbook §213 proposal
-  #     `offset: 15` + clamp [0, 90] which produced ~34° at l20=0; this
-  #     affine-only form preserves the M7-byte-identical flag=false guard
-  #     while matching the runbook's intended bias strength).
-  #   - clamp + offset + sign UNCHANGED → flag=false path byte-identical to
-  #     M5b/M6/M7. verify_flag_false_byte_identical.sh passes (the M8b guard
-  #     held — only the affine layer moved).
-  #   - thumb_bend + thumb_rota1 still deferred (no input/output_range);
-  #     revisit only if four-finger fix + thumb_rota2 bias don't restore the
-  #     pinch.
+  # 2026-05-25 round 2 (commit 472da5a) restored plan §25 values: four-finger
+  # output_range[1] = 110 (= clamp = physical limit at the time) and
+  # thumb_rota2 output_range = [30, 50]. PC2 visual verify after round 2
+  # still showed (a) four fingers not closing far enough — "再增加一点点"
+  # — and (b) thumb "非常明显" still on the outside of the four fingers.
+  #
+  # 2026-05-25 round 3 (this commit) — URDF-grounded diagnostic flip:
+  #   The operator hypothesized clamp was the bottleneck. URDF lookup
+  #   (URDF/XHAND 1/XHAND1_URDF_ver 1.3/xhand1_*/urdf/) inverted that:
+  #     - Four-finger joint1/joint2 mechanical upper = 109.95° → current
+  #       clamp [0, 110] is ALREADY AT THE MECHANICAL CEILING. Raising it
+  #       would crash the joint-limit hard stop, not gain closure. The
+  #       real bottleneck is input_range[1] being too high: M8a calibration
+  #       captured UDCAP max = 80°/92° per joint, so a "normal" fist that
+  #       only reaches UDCAP 65°–75° maps to ~80%–90% of clamp, not 100%.
+  #     - thumb_rota2 mechanical upper = 89.95° → round-2 clamp [0, 50]
+  #       only used 56% of physical range. The original path-A-runbook
+  #       §213 proposal (clamp [0, 90] + offset 15 + output_range [0, 90])
+  #       was URDF-correct; rounds 1+2 stayed inside [0, 50] purely to
+  #       preserve the flag=false guard. Round 3 lifts the clamp.
+  #
+  #   Changes:
+  #     - 8x four-finger joint1: input_range[1] 80→72 (pinky 75.20→68).
+  #       Same sensitivity logic for joint2: 92→82 (pinky 85.30→77).
+  #       Effect: ~10% smaller UDCAP input now saturates clamp[1]=110, so
+  #       a less-than-maximal fist reaches full XHand closure.
+  #     - thumb_rota2 (L+R): clamp [0, 50] → [0, 90], output_range [30, 50]
+  #       → [40, 90]. At UDCAP l20=0 the XHand thumb sits ~41.2° toward
+  #       palm (was ~30.5° in round 2); at max UDCAP opposition the thumb
+  #       reaches 90° = full mechanical opposition (was 50°). Matches the
+  #       path-A-runbook §213 intent of clamp [0, 90] but expressed as a
+  #       pure affine remap (offset stays 0) for arithmetic simplicity.
+  #
+  #   Flag=false guard impact: example.json l20 = -0.6 (left) / 1.2
+  #   (right). Both lie INSIDE both the old [0, 50] and new [0, 90] clamp
+  #   bands, so flag=false output for thumb_rota2 is byte-identical (the
+  #   raised ceiling is never hit by the test fixture). Four-finger
+  #   input_range changes don't touch flag=false at all (input/output_range
+  #   are reset when use_new_retarget=false).
+  #   verify_flag_false_byte_identical.sh re-run after this edit → passes.
+  #
+  #   thumb_bend + thumb_rota1 still untouched. If round 3 visual verify
+  #   still shows poor pinch / thumb misalignment, the next axis to tune
+  #   is thumb_bend (URDF upper = 104.97°, plenty of room).
   use_new_retarget: true
   left:
     thumb_bend:    { sources: [0, 1, 2], weights: [0.3, 0.3, 0.4], sign: -1, offset: 0, clamp: [-10, 110] }
     thumb_rota1:   { sources: [3],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 110] }
-    thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 50],
-                     input_range: [-1.00, 41.00], output_range: [30, 50] }
+    thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 90],
+                     input_range: [-1.00, 41.00], output_range: [40, 90] }
     index_bend:    { sources: [7],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 30] }
     index_joint1:  { sources: [6],       weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 80.00], output_range: [0, 110] }
+                     input_range: [0.00, 72.00], output_range: [0, 110] }
     index_joint2:  { sources: [5, 4],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 92.00], output_range: [0, 110] }
+                     input_range: [0.00, 82.00], output_range: [0, 110] }
     mid_joint1:    { sources: [10],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 80.00], output_range: [0, 110] }
+                     input_range: [0.00, 72.00], output_range: [0, 110] }
     mid_joint2:    { sources: [9, 8],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 92.00], output_range: [0, 110] }
+                     input_range: [0.00, 82.00], output_range: [0, 110] }
     ring_joint1:   { sources: [14],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.60, 80.00], output_range: [0, 110] }
+                     input_range: [0.60, 72.00], output_range: [0, 110] }
     ring_joint2:   { sources: [13, 12],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 92.00], output_range: [0, 110] }
+                     input_range: [0.00, 82.00], output_range: [0, 110] }
     pinky_joint1:  { sources: [18],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 75.20], output_range: [0, 110] }
+                     input_range: [0.00, 68.00], output_range: [0, 110] }
     pinky_joint2:  { sources: [17, 16],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 85.30], output_range: [0, 110] }
+                     input_range: [0.00, 77.00], output_range: [0, 110] }
   right:
     thumb_bend:    { sources: [0, 1, 2], weights: [0.3, 0.3, 0.4], sign: -1, offset: 0, clamp: [-10, 110] }
     thumb_rota1:   { sources: [3],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 110] }
-    thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 50],
-                     input_range: [-1.00, 41.00], output_range: [30, 50] }
+    thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 90],
+                     input_range: [-1.00, 41.00], output_range: [40, 90] }
     index_bend:    { sources: [7],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 30] }
     index_joint1:  { sources: [6],       weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 80.00], output_range: [0, 110] }
+                     input_range: [0.00, 72.00], output_range: [0, 110] }
     index_joint2:  { sources: [5, 4],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 92.00], output_range: [0, 110] }
+                     input_range: [0.00, 82.00], output_range: [0, 110] }
     mid_joint1:    { sources: [10],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 80.00], output_range: [0, 110] }
+                     input_range: [0.00, 72.00], output_range: [0, 110] }
     mid_joint2:    { sources: [9, 8],    weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 92.00], output_range: [0, 110] }
+                     input_range: [0.00, 82.00], output_range: [0, 110] }
     ring_joint1:   { sources: [14],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 80.00], output_range: [0, 110] }
+                     input_range: [0.00, 72.00], output_range: [0, 110] }
     ring_joint2:   { sources: [13, 12],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 92.00], output_range: [0, 110] }
+                     input_range: [0.00, 82.00], output_range: [0, 110] }
     pinky_joint1:  { sources: [18],      weights: [1.0],            sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 75.20], output_range: [0, 110] }
+                     input_range: [0.00, 68.00], output_range: [0, 110] }
     pinky_joint2:  { sources: [17, 16],  weights: [0.6, 0.4],       sign: -1, offset: 0, clamp: [0, 110],
-                     input_range: [0.00, 85.30], output_range: [0, 110] }
+                     input_range: [0.00, 77.00], output_range: [0, 110] }
