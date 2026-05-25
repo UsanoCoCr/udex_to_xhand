@@ -102,7 +102,34 @@ mapping:
   #   still shows poor pinch / thumb misalignment, the next axis to tune
   #   is thumb_bend (URDF upper = 104.97°, plenty of room).
   #
-  # 2026-05-25 round 4 (this commit) — thumb_bend offset hypothesis:
+  # 2026-05-25 round 5 (this commit) — drop thumb_bend rest bias, widen ROM:
+  #   Round 4 set thumb_bend output_range = [40, 100]: at UDCAP rest the
+  #   thumb base was commanded to 40° (pre-flexed toward palm), and at full
+  #   curl reached only 100°. PC2 visual verify: operator reports the
+  #   thumb base joint is visibly bent at rest AND barely changes during
+  #   grasping — both consequences of the [40, 100] window (60° total ROM,
+  #   already 67% pre-flexed at rest). Grasp success rate suffers because
+  #   the thumb sits in roughly the same posture whether the glove is open
+  #   or closed.
+  #
+  #   Fix: thumb_bend output_range [40, 100] → [0, 105]. At UDCAP rest the
+  #   joint sits straight (0°, matches operator request "初始的时候是直的"),
+  #   and full curl reaches 105° = URDF mechanical upper (104.97° from
+  #   xhand1_*/urdf/), giving 105° of visible motion (1.75x round-4 ROM).
+  #   input_range stays [0, 60] so the slope/sensitivity is unchanged; only
+  #   the response window is shifted down and stretched up.
+  #
+  #   Flag=false guard impact: input_range / output_range are only consulted
+  #   when use_new_retarget = true (see joint_mapper rescale gate), so the
+  #   M7 baseline output for thumb_bend is unchanged. clamp [-10, 110] still
+  #   covers the new output_range[1]=105, so post-rescale clamping is a
+  #   no-op at the limit. verify_flag_false_byte_identical.sh stays green.
+  #
+  #   thumb_rota2 unchanged ([40, 90]). If round 5 visual verify shows the
+  #   thumb tip swings nicely toward palm but rota2 opposition feels wrong,
+  #   the next axis to tune is thumb_rota2 output_range[0].
+  #
+  # 2026-05-25 round 4 (superseded by round 5) — thumb_bend offset hypothesis:
   #   Round 3 lifted thumb_rota2 clamp to [0, 90] (URDF physical max) and
   #   pushed initial bias to 40°. PC2 visual verify: thumb still "明显在
   #   手侧面", and "没有明显变化" between rounds 2 and 3. Two readings:
@@ -133,7 +160,7 @@ mapping:
   use_new_retarget: true
   left:
     thumb_bend:    { sources: [0, 1, 2], weights: [0.3, 0.3, 0.4], sign: -1, offset: 0, clamp: [-10, 110],
-                     input_range: [0, 60], output_range: [40, 100] }
+                     input_range: [0, 60], output_range: [0, 105] }
     thumb_rota1:   { sources: [3],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 110] }
     thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 90],
                      input_range: [-1.00, 41.00], output_range: [40, 90] }
@@ -156,7 +183,7 @@ mapping:
                      input_range: [0.00, 77.00], output_range: [0, 110] }
   right:
     thumb_bend:    { sources: [0, 1, 2], weights: [0.3, 0.3, 0.4], sign: -1, offset: 0, clamp: [-10, 110],
-                     input_range: [0, 60], output_range: [40, 100] }
+                     input_range: [0, 60], output_range: [0, 105] }
     thumb_rota1:   { sources: [3],       weights: [1.0],            sign: -1, offset: 0, clamp: [-10, 110] }
     thumb_rota2:   { sources: [20],      weights: [1.0],            sign:  1, offset: 0, clamp: [0, 90],
                      input_range: [-1.00, 41.00], output_range: [40, 90] }
