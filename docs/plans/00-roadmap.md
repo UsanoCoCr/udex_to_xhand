@@ -8,6 +8,7 @@
 - 2026-05-18 — 第 4 次修订 — M5b 在 G1 PC2 上执行通过（C++17 单二进制 `udex_to_xhand` 落地；mock 300/300 ticks；snapshot test L max |Δ|=0.0e+00 rad / R max |Δ|=1.4e-17 rad，远低于 1e-6 tolerance；receiver-only @ UDCAP 192.168.3.24 收 616/1000 包 0 parse errors；`-Wall -Wextra -Wpedantic` 无警告）。新增 ADR-028 / 029 / 030 / 031（纯 C++ 重写 / CalibrationStatus pre-check 拆 UDCAP+XHand 两侧 / snapshot fixture 用 SHA-256 自校验 / `legacy_python/` 提前到 M5b 重组）。`legacy_python/` 创建于本 milestone 作为 Python 原型的归集点。Execution Record 见 [plan §11](./20260518-m5b-cpp-rewrite-plan.md#11-6-execution-record-filled-at-end-of-m5b)，日志归档 `docs/logs/m5b-{cmake,make,mock-run,snapshot-test,receiver}-2026-05-18.log`。
 - 2026-05-19 — 第 6 次修订 — M8 范围澄清：明确拇指重定向不能沿用 copy-rotation —— XHand 拇指零位与其余四指掌面近似正交，与 UDCAP 拇指零点不同源，逐关节直传会错配对掌；升级为独立的 retargeting 算法工作项，与四指 mapping 解耦。原"微调 mapping"一条拆分为「拇指重定向算法重做」+「四指 mapping 微调」两条；算法形态留到 M8 调研后定，决策走新 ADR。
 - 2026-05-20 — 第 11 次修订 — M8 范围再扩展：M7 双手集成后实测发现戴满 UDCAP 时 XHand 四指 (index/mid/ring/pinky 共 9 DOF) **未贴到物理屈曲上限** —— UDCAP 1:1 度数直传被人手戴 UDCAP 时的实际可达屈曲范围（< XHand 关节全程）"夹"住，指尖始终留余量，无法完整闭合到掌心 → 杯壁接触力不足，抓杯无法成立。**根因不是 PID 力矩 / stall，而是 mapping 输出行程没拉满**（与拇指对掌错配是两类不同问题）。原"四指 mapping 微调"一条升级为关键工作项「四指闭合行程不足修复」，与拇指 retargeting 并列：UDCAP 双端 calibration 拿真实输入值域 → `src/joint_mapper.cpp` 四指改 affine input→output rescale → 复跑「握拳」视觉验收。决策走独立 ADR（不与拇指 retargeting 算法 ADR 合并）。
+- 2026-05-25 — 第 13 次修订 — **M9 scope 扩展：加入指尖触觉传感器数据采集**。SDK 调研确认 `xhand_control::XHandControl::read_state()` 返回的 `HandState_t` (data_type.hpp:117-120) **同时**包含 `std::array<FingerState_t, 12>` (12 关节 position + torque + raw + temperature) **和** `std::array<SenserData_t, 5>`（5 个指尖触觉传感器，每个含 `calc_force` 3-axis 合力 + `raw_force[120]` 120-taxel 阵列原始力 + `temperature[20]` 20 点温度 + `calc_temperature`，共 384 字节/指尖 = 1920 字节/手原始）—— 触觉数据 **天然在 M9c 主循环已规划的 `read_state()` 单次 RS485 往返 return 里**，零额外 SDK 调用、零 RS485 延迟成本。用户访谈（2026-05-25）确认默认 **100Hz 满采触觉**（与 finger_state 同频），对 BC/IL 训练样本最肥的关节-触觉 pair 粒度。M9b msg schema 新增 `udex_to_xhand_msgs/HandTactile.msg` 自定义类型，topic 总数 5 → 7（加 `/xhand/left/tactile` + `/xhand/right/tactile`）；M9c `ros_publisher` 加 `publish_left_tactile / publish_right_tactile` API；M9d latency budget 增加 in-process publish ≈ +1ms（5 publish → 7 publish），p95 预算窗口仍 < 40ms；M9e rosbag command + bag info expected counts 同步更新；bag 体积 ~2 KB/手/tick 序列化 × 100Hz × 双手 ≈ 400 KB/s = 24 MB/60s session（M9e）/ ~720 MB/30min session（长期采集）；新增 **ADR-057（M9b 后落）**：`HandTactile.msg` schema 设计 + 与 `HandDiagnostics`/`JointState` 三类 topic 解耦的理由（编号承接 M8 ADR-056 之后，跳过 050-052 M8d/e conditional 保留区间）。**ADR-044 不需重写** —— 触觉 read 仍只走 publish 路径，禁止 `joint_mapper` / `safety` / `main` 控制环引用，与现有 `read_state` 关节 observation 同 scope。
 - 2026-05-25 — 第 12 次修订 — **M8 Path A（M8a + M8b + M8c）视觉验收通过；M8d / M8e（PID 调参 + 30 min 压测 + 5 次抓杯验收）显式推到后续**。Path A 走 calibrate-first iterative tuning 路径（runbook `docs/plans/20260521-m8-path-a-runbook.md` 落地）：M8a 引入 `mapping.use_new_retarget` 必填总开关 + `--actions calibrate-udcap` UDP-only 子模式 + frozen M7 reference fixture + 自动化 verify shell guard（ADR-053 / 054 / 048 ←calibrate 部分）；M8b 四指 affine rescale schema 落地 + 4 轮 PC2 视觉迭代调参（rounds 1→4 共 5 个 commit `8262593 / 472da5a / 064801a / b28bac4`），round 3 由 URDF 反查纠错收窄四指 `input_range[1]` 80→72 / 92→82 + raise `thumb_rota2 clamp` 到 [0, 90]（ADR-055），round 4 由 hypothesis update 加 `thumb_bend +40° rest bias`（ADR-056）解决"拇指明显在手侧面"问题；M8c 写了 Python prototype + UDCAP recorder（commit `b31abf6`）但未跑算法 B/C 对比 — algorithm A (per-joint affine + offset) 在 Path A 迭代中已视觉通过，prototype 留作 cup acceptance 失败时的下一手棋（ADR-049）。**操作员视觉验收**: 「大拇指和四指虽然可能后续还需要微调，但从视觉上没有太大问题了」。**未跑**: plan §M8e 5 次抓杯 ≥3 成功（CLAUDE.md 项目终极 acceptance）、30 min 双手压测、PID 调参（M8d）。这些项目作为「M8 残留 / 与 M9 并行」处理，不阻塞 M9 ROS2 数据采集（见 §M8 ✅ 块的 Known Issues）。新增 ADR-048 (四指 affine rescale + calibrate-udcap 模式) / 049 (拇指 algorithm A via Path A 迭代) / 053 (`use_new_retarget` master flag) / 054 (frozen M7 reference + auto verify guard) / 055 (URDF as mechanical-limit truth) / 056 (`thumb_bend` rest bias mechanism)；编号 050–052 保留给 M8d/M8e conditional ADRs（PID 调参结论 / EMA 滤波 / ~100ms latency outlier 根因）。Execution Record 见 §M8 Path A ✅ 块 + commit graph `8187ca3..b28bac4`，日志归档 `docs/logs/m8a-calibrate-{left,right,fragment}-2026-05-21.log` + `docs/logs/m8-pathA-{cmake,make,snapshot-baseline,test-safety,receiver-smoke}-2026-05-21.log` + `docs/logs/m8-final-{cmake,make,snapshot,test-safety,single-regression,dual-clean}-2026-05-21.log`（14 个）。
 - 2026-05-19 — 第 7 次修订 — **M6 在 G1 PC2 上 5/5 安全场景通过；M6 整体 ✅**。Watchdog stale 反应（10 条 1Hz `LOG_WARN` + `recovered after 87ms` + hand 物理保持）/ SIGINT mode=0（视觉，log 因 `tee` 截断不完整）/ SIGTERM mode=0（log 完整落盘）/ per-joint clamp 收窄后食指 J4 停在 30°（视觉）/ Startup gate 10s 超时 `LOG_ERROR` + driver 析构 mode=0+close —— 全部行为级符合 SPEC §5。新增 ADR-035（stale-resend @ 100Hz + LOG_WARN @ 1Hz）/ 036（startup gate 10s, exit 2）/ 037（snapshot fixture 随 config.yaml schema 变化必须 regen；M6 实测被 ADR-030 SHA 自校验在 P0 捕获）/ 038（recovered Nms 语义 = 自最近一次 WARN 起、非总停发时长；与 plan §4.2 P1 预期错位的记录）。Known issues：P2 SIGINT 下 `tee` 截断（M5c §6.6 SIGTERM 同源问题在 SIGINT 上仍存在，操作员视觉确认 OK，未来用背景化 + `kill -INT` 模式）；watchdog/clamp 长 session 单点 latency outlier ≈ 100ms（M5c 是 10.68ms；p95 稳定 9.62ms 不变；留 M8 stress test 排查）。Execution Record 见 [plan §8](./20260519-m6-safety-hardening-plan.md#8-execution-record-filled-at-end-of-m6)，日志归档 `docs/logs/m6-{build,watchdog,sigint,sigterm,clamp,startup-gate}-2026-05-19.log`（6 个）。
 - 2026-05-19 — 第 8 次修订 — **M7 在 G1 PC2 上双手集成验证通过；M7 整体 ✅**（不过覆盖度低于 M5c/M6，详见下文）。架构关键转折：plan rev1 假设的单口 RS485 multi-drop 在硬件 probe 中被证伪 —— PC2 实际两个独立 USB CDC-ACM 端点，一只 XHand 一条总线。同日 plan 改 rev2（commit b2253da），代码改双 `XHandDriver`（commit 4111a82：`main.cpp` 持 `driver_left/right` 两个 `optional`、`config.yaml` schema 拆 left/right_serial_port、ADR-039 落地）。rev1 引入的 `XHandDriver::open(require_both)` 由 commit 375e8e7 revert。**执行验证状态**：§4.1 P0 build / snapshot / test_safety / §4.2 双口枚举 / §4.5 P2b' dual SIGTERM mode=0×2 + close ✅ log 实证；`--hand left` 单手回退 latency `n=310 avg=9.59 p95=9.63 max=10.69ms` 与 M5c baseline 字节一致 → 双驱动重构无单手回退；§4.5 P1' watchdog stale / P3' clamp / P5' startup gate timeout / P6' A/B fail-closed / §4.3 右手单指逐项验收 / §4.4 60s 双手干净 teleop —— **未 log 实证**，操作员视觉确认通过。**双手延迟**（m7-watchdog-dual 25s session, n=1164）`avg=19.38 p95=19.20 max=111.17 ms`：avg/p95 ≈ 2× M5c 单手 baseline 是双 `send_command` 串行 over 两条独立 USB-RS485 路径的结构性代价，p95 在 20ms 预算内 0.80ms 余量；max=111ms 单点 outlier 与 M6 roadmap rev 7 ~100ms outlier 同源，推到 M8 30 min 压测调查。新增 ADR-039（双口架构，retire rev1 ADR-040）/ ADR-041（双口延迟特性 + ~100ms outlier 推到 M8）/ ADR-042（PC2 CDC-ACM 枚举 session-local，需每会话重探）。同日两次硬件 probe 间右手端口从 ACM1 漂到 ACM0（ADR-042 直接 trigger），M7 ✅ commit 把 `config.yaml` pin 到实测 ACM2/ACM0。SPEC §2 架构图重画为双 RS485 路径；§10 R3 关闭（多 drop 不存在），新增 R11（latency outlier）/ R12（USB 枚举漂移）；§12 Q3 状态更新（右手 sign 验证留 M8），Q4 RESOLVED。Known issues 落 plan §8.4：(a) plan §4.4 / §4.5 P1'/P5'/P6' A/B 未 log captured，M8 需保持 log 纪律（背景化 + `kill -TERM`，不要 SIGINT）；(b) right-hand mapping starting hypothesis 未充分验证，M8 验收测试（抓杯）是该 hypothesis 的实战检验；(c) 双口架构 USB 枚举漂移已影响一次会话（plan rev2 内）。Execution Record 见 [plan §8](./20260519-m7-dual-hand-integration-plan.md#8-execution-record-fill-at-end-of-m7)，日志归档 `docs/logs/m7-{cmake,make,snapshot,test-safety,enum,watchdog-dual,clamp-dual,single-regression}-2026-05-19.log`（8 个）。
@@ -373,23 +374,25 @@ PC2 上完成 M8 Path A operator runbook (`docs/plans/20260521-m8-path-a-runbook
 
 ## M9: ROS2 数据记录（训练数据采集）
 
-**目标**: 把 `udex_to_xhand` 从纯 C++ 二进制升级为 ROS2 node，把双手实时遥操中产生的 action（commanded 12 关节）+ observation（XHand `read_state()` 12 关节实测）+ 原始 24 路 UDCAP 输入 + 三段时间戳全部 publish 到 ROS2 topic，在 PC2 本地用独立 `ros2 bag record` 落盘。输出 schema 与师兄机器人侧现有 rosbag 共用同一 `/clock`、共用 `sensor_msgs/JointState` 标准类型 → 双方 bag 可按 timestamp 直接 merge，供下游 BC / IL 模型训练消费。这是项目收尾 milestone — 把已通过 M8 验收的遥操变成可重放、可训练的数据流水线。
+**目标**: 把 `udex_to_xhand` 从纯 C++ 二进制升级为 ROS2 node，把双手实时遥操中产生的 action（commanded 12 关节）+ observation（XHand `read_state()` 12 关节实测 **+ 5 指尖触觉传感器**）+ 原始 24 路 UDCAP 输入 + 三段时间戳全部 publish 到 ROS2 topic，在 PC2 本地用独立 `ros2 bag record` 落盘。输出 schema 与师兄机器人侧现有 rosbag 共用同一 `/clock`、共用 `sensor_msgs/JointState` 标准类型 → 双方 bag 可按 timestamp 直接 merge，供下游 BC / IL 模型训练消费。这是项目收尾 milestone — 把已通过 M8 验收的遥操变成可重放、可训练的数据流水线。
 
-**为什么用 ROS2 + 为什么 read_state 必须打开**:
+**为什么用 ROS2 + 为什么 read_state 必须打开（含触觉）**:
 - 师兄机器人侧已用 ROS2 + rosbag2 录所有 action / timestamp。灵巧手做同 stack 集成是「与机器人侧时间轴对齐」成本最低的路径 — 同一 ROS `/clock` 节拍下 publish 即天然同步，不需要事后按墙钟 merge
-- 用例升级为 BC/IL 训练数据采集：训练样本是 (observation, action) pair，observation 必须是 XHand 实测关节角 `read_state()`，不能只用 commanded 值（否则训出来的模型不知道真实硬件响应特征）
+- 用例升级为 BC/IL 训练数据采集：训练样本是 (observation, action) pair，observation 必须是 XHand 实测关节角 `read_state()` + 指尖触觉，不能只用 commanded 值（否则训出来的模型不知道真实硬件响应特征 + 没有接触力闭环信号，抓杯类任务训不出有效策略）
+- **触觉天然在 `read_state()` 同一次 return 里**：`HandState_t` (data_type.hpp:117-120) 同时携带 `std::array<FingerState_t, 12>` 与 `std::array<SenserData_t, 5>` — 一次 RS485 同步读，关节 state + 5 指尖触觉都到位。M9c 主循环里 read_state ×2 已计入 latency 预算（每只手一次），触觉零额外 SDK 调用 / 零额外 RS485 往返
 - 替代方案（独立 bridge node / 内嵌 rosbag2 writer）都引入多一跳时间戳同步问题；udex_to_xhand 自身变 ROS2 node 是单一 `/clock` 语义、最少跨进程跳转
 
 **两条 CLAUDE.md 现有约束需在本 milestone 显式废除（各走独立 ADR 限定范围）**:
 - 「Do NOT use ROS2 (`xhand_control_ros2/` exists in repo as reference only)」 — 原意是 100Hz 控制循环不引入 ros2_control 框架开销；M9 仅在主循环出口加 publish 路径，不引入 ros2_control / ros2_controllers / lifecycle_node 等控制框架。走 **ADR-043** 限定废除范围
-- 「Do NOT read XHand sensors / 实现 force feedback」 — 原意是防止把 `read_state` 接入实时控制闭环（反馈控制需独立设计）；M9 仅在主循环 `send_command` 之后调用一次 `read_state`，结果只 publish 到 ROS topic，不参与下一帧 command 计算。走 **ADR-044** 限定废除范围
+- 「Do NOT read XHand sensors / 实现 force feedback」 — 原意是防止把 `read_state` 接入实时控制闭环（反馈控制需独立设计）；M9 仅在主循环 `send_command` 之后调用一次 `read_state`（每只手一次），返回的 `HandState_t.finger_state[12]` 与 `HandState_t.sensor_data[5]`（指尖触觉）**两个 observation 通道** 都只 publish 到 ROS topic，不参与下一帧 command 计算。**触觉数据 obey 同一 ADR-044 scope** — `joint_mapper` / `safety` / `main` 控制路径禁止引用 `sensor_data`，与 `finger_state` 同 scope。走 **ADR-044** 限定废除范围（一条 ADR 覆盖关节 state + 触觉两类 observation，不拆）
 
-**前置已确认（2026-05-20 用户访谈）**:
+**前置已确认（2026-05-20 + 2026-05-25 用户访谈）**:
 - ROS 版本: ROS2（具体 distro 待师兄确认，候选 Humble / Iron / Jazzy；本 milestone M9a 第一步即敲定）
 - 集成形态: `udex_to_xhand` 本身变 ROS2 node，直接 publish，不走外挂 bridge / 不走内嵌 rosbag2 writer
-- `read_state` 策略: 主控环路上同步调用，100Hz 满采 — observation 与 action 同帧
-- Msg schema: action + state 走 `sensor_msgs/JointState`；raw UDCAP + safety + latency 走自定义 `udex_to_xhand_msgs/HandDiagnostics`
-- Topic 命名: `/xhand/{left,right}/{command,state}` 四个 JointState + `/xhand/diagnostics` 一个
+- `read_state` 策略: 主控环路上同步调用，100Hz 满采 — observation（关节 + 触觉）与 action 同帧
+- **触觉采样策略 (2026-05-25 确认)**: 主环 100Hz 满采 raw_force[120] + calc_force + temperature[20]，与 finger_state 同频；不降频、不分通道（次选「raw_force 30Hz / calc_force 100Hz」放弃，因 dataloader 侧 interp 复杂度大于 bandwidth 收益）
+- Msg schema: action + state 走 `sensor_msgs/JointState`；触觉走自定义 `udex_to_xhand_msgs/HandTactile`；raw UDCAP + safety + latency 走自定义 `udex_to_xhand_msgs/HandDiagnostics` — **三类 msg 解耦**（关节 state vs 触觉数组 vs metadata），便于 dataloader 单独按 topic 取
+- Topic 命名: `/xhand/{left,right}/{command,state,tactile}` 六个（4 JointState + 2 HandTactile）+ `/xhand/diagnostics` 一个 = **7 个 topic**
 - Bag ownership: PC2 本地起独立 `ros2 bag record /xhand/*`（不依赖机器人侧 record 配置）
 
 **内容**:
@@ -413,43 +416,67 @@ PC2 上完成 M8 Path A operator runbook (`docs/plans/20260521-m8-path-a-runbook
   float32 cycle_latency_ms                     # 本 tick UDP→send 总耗时
   uint8 safety_flags                           # bit0=stale frame, bit1=clamp triggered, bit2=parse error
   ```
-- 5 个 topic 的 QoS profile 选 `rclcpp::SensorDataQoS()`（best_effort，depth=10）— 数据采集场景丢一帧可接受，绝不阻塞主循环
-- 验收: `colcon build --packages-select udex_to_xhand_msgs` 干净通过；`ros2 interface show udex_to_xhand_msgs/msg/HandDiagnostics` 输出 schema 正确
+- 定义 `HandTactile.msg`（**M9 触觉扩展，与 HandDiagnostics 解耦**）— schema 1:1 镜像 `xhand_control_sdk` 中 `HandState_t.sensor_data` (data_type.hpp:117-120) 的 5×SenserData_t 数组：
+  ```
+  std_msgs/Header header                                 # 与同 tick /xhand/<hand>/state 的 stamp 一致
+  builtin_interfaces/Time read_state_stamp               # read_state() 调用返回时刻（用于 dataloader 校验同步）
+  # 5 个指尖传感器，顺序固定为 thumb / index / middle / ring / pinky
+  # 与 XHand 关节 0/3/6/8/10 (data_type.hpp 关节编号) 在解剖学上一一对应
+  int8[15]    calc_force                                  # 5 × (fx, fy, fz)，PXSR_ForceData int8/int8/uint8 → int16/8 packed 解开为有符号
+  int16[1800] raw_force                                   # 5 sensors × 120 taxel × (fx, fy, fz)，flat row-major；taxel 在指尖表面的 2D 布局由 SDK 文档定义（M9b 在 msg comment 中链 SDK 章节）
+  uint8[100]  taxel_temperature                           # 5 × 20 个温度点
+  uint8[5]    calc_temperature                            # 5 个 calc_temperature 汇总
+  uint8       sensor_health_flags                         # bit0..4 = thumb..pinky 是否成功 read（read_state 单 sensor 失败时 fall back to last-valid + flag）
+  ```
+  序列化 size estimate (per hand, per tick): header ~30 B + 15 + 3600 + 100 + 5 + 1 + ROS overhead ≈ **2 KB**；100 Hz × 2 hands = ~400 KB/s 双手 publish bandwidth；30 min × 2 ≈ 720 MB（与 finger_state JointState ~30 MB 同期相比是主要 bag 体积来源，但仍可接受，PC2 SSD 写入预算充足）
+- 7 个 topic 的 QoS profile 选 `rclcpp::SensorDataQoS()`（best_effort，depth=10）— 数据采集场景丢一帧可接受，绝不阻塞主循环。**HandTactile 单 msg ~2 KB / 100Hz 是 publish 路径里最大单元**，depth=10 buffer ≈ 200 KB/topic，rclcpp in-process publish 走 shared memory + serialize-on-deliver，主循环阻塞 < 0.5ms（M9d 实测）
+- 验收: `colcon build --packages-select udex_to_xhand_msgs` 干净通过；`ros2 interface show udex_to_xhand_msgs/msg/HandDiagnostics` + `ros2 interface show udex_to_xhand_msgs/msg/HandTactile` 输出 schema 正确
 
 ### M9c · `udex_to_xhand` → ROS2 node（1d）
 - 顶层 `CMakeLists.txt` 改造: 保留 `find_package(xhand_control HINTS xhand_control_sdk/share)`；新增 `find_package(rclcpp REQUIRED)` + `find_package(sensor_msgs REQUIRED)` + `find_package(udex_to_xhand_msgs REQUIRED)`；用 `ament_target_dependencies(udex_to_xhand rclcpp sensor_msgs udex_to_xhand_msgs)` 接通；保留原有 `nlohmann_json` / `yaml-cpp` / `libcurl` / `libssl` 链接
-- 新增 `src/ros_publisher.{hpp,cpp}`: 持 5 个 `rclcpp::Publisher`（4 个 `JointState` + 1 个 `HandDiagnostics`），暴露 `publish_left_command(joints, stamp)` / `publish_left_state(joints, currents, stamp)` / `publish_right_*` / `publish_diagnostics(...)` API。内部封装 `rclcpp::Node`（名字 `udex_to_xhand_node`）
-- `src/xhand_driver.{hpp,cpp}`: 新增 `HandState_t read_state()` 包装（封装 `xhand_control::XHandControl::read_state`），返回 12 个 position 弧度 + 12 个 current。ADR-044 范围内**仅作 observation 输出**，禁止被 `joint_mapper` 或安全层引用
+- 新增 `src/ros_publisher.{hpp,cpp}`: 持 7 个 `rclcpp::Publisher`（4 个 `JointState`【command/state × 2 手】+ 2 个 `HandTactile`【tactile × 2 手】+ 1 个 `HandDiagnostics`），暴露 `publish_left_command(joints, stamp)` / `publish_left_state(joints, currents, stamp)` / `publish_left_tactile(sensor_data, stamp)` / `publish_right_*` / `publish_diagnostics(...)` API。内部封装 `rclcpp::Node`（名字 `udex_to_xhand_node`）。**触觉 publish API 把 `HandState_t.sensor_data[5]` packed 字节展开为 msg 字段**（PXSR_ForceData int8/uint8 → msg int8/int16 数组按 M9b schema），转换在 publisher 内部完成，main 循环只传 `HandState_t` 引用
+- `src/xhand_driver.{hpp,cpp}`: 新增 `HandState_t read_state()` 包装（封装 `xhand_control::XHandControl::read_state`），**完整返回原始 `HandState_t` 结构体**（12 个 `FingerState_t` + 5 个 `SenserData_t`）。**关节侧用 `finger_state[12]` 的 position 弧度 + torque（current mA）填 `JointState`**；**触觉侧用 `sensor_data[5]` 填 `HandTactile`**。ADR-044 范围内**整个 HandState_t 仅作 observation 输出**，禁止 `joint_mapper` / `safety` 层访问 `finger_state` 或 `sensor_data`
 - `src/main.cpp` 主循环 tick 顺序（M9 后定型）:
   1. `udcap_receiver.try_recv()` → raw 24 路 + `udcap_frame_stamp` + `receive_stamp`
   2. `joint_mapper.map()` → commanded 12 路（per hand）
   3. `xhand_driver.send_command()` → 记 `send_stamp`
-  4. `xhand_driver.read_state()` → observed 12 路 + currents（双手各一次）
-  5. `ros_publisher.publish_all(...)` → 4 JointState + 1 diagnostics
-- CLI 新增 `--no-ros` flag，沿用 M5b 起的 standalone 模式（允许不带 ROS2 环境跑 — for snapshot test / `--actions` 预设 / regression 测试）
-- 验收: `colcon build --symlink-install --packages-select udex_to_xhand`；`ros2 run udex_to_xhand udex_to_xhand --config config.yaml` 启动后另一终端 `ros2 topic hz /xhand/left/command` 显示 ≈100Hz；`ros2 topic echo /xhand/left/state` 应见 position[12]+effort[12]；`ros2 topic echo /xhand/diagnostics` 应见 raw_udcap + safety_flags + cycle_latency_ms
+  4. `xhand_driver.read_state()` → 返回完整 `HandState_t`（双手各一次；内含 finger_state[12] + sensor_data[5]）
+  5. `ros_publisher.publish_all(...)` → **4 JointState + 2 HandTactile + 1 diagnostics = 7 publish**；每个共享同一 `header.stamp = receive_stamp`，便于 dataloader 按 stamp 跨 topic merge
+- CLI 新增 `--no-ros` flag，沿用 M5b 起的 standalone 模式（允许不带 ROS2 环境跑 — for snapshot test / `--actions` 预设 / regression 测试）；`--no-ros` 时 read_state 也跳过（mode=0 触觉数据无意义）
+- 验收: `colcon build --symlink-install --packages-select udex_to_xhand`；`ros2 run udex_to_xhand udex_to_xhand --config config.yaml` 启动后另一终端：
+  - `ros2 topic hz /xhand/left/command` 显示 ≈100Hz（action 路径）
+  - `ros2 topic hz /xhand/left/tactile` 显示 ≈100Hz（触觉路径与 action 同频，证明 read_state 单次返回打通了两个通道）
+  - `ros2 topic echo /xhand/left/state` 应见 position[12]+effort[12]
+  - `ros2 topic echo /xhand/left/tactile --once` 应见 calc_force[15] + raw_force[1800] + temperature[100] + calc_temperature[5] + sensor_health_flags
+  - `ros2 topic echo /xhand/diagnostics` 应见 raw_udcap + safety_flags + cycle_latency_ms
 
 ### M9d · Latency 回归（0.25d）
 - 戴手套跑 30s 双手 teleop（UDCAP 在线），在 `--config config.yaml --hand both` 下打 `latency_ms{n avg p95 max}`（沿用 M5c / M7 的 vector+sort stats，ADR-033）
-- 与 M7 单帧基线 `avg=19.38 p95=19.20 max=111.17` 对比，预算: read_state ×2（≈2-4ms RS485 同步读）+ ROS publish ×5（≈1-2ms in-process）→ M9 后 avg 估 22-26ms，p95 估 25-28ms，距 SPEC §9 50ms 阈值仍留 40%+ 余量
-- 若 p95 > 40ms: 走 ADR-04x 降级到 state 30Hz 采样（访谈第 3 选项），主循环保持 100Hz 但 read_state 每 3 tick 才调一次；dataloader 侧 interpolate
-- 验收: latency 报告 + 与 M7 baseline 对比表入 plan §execution-record；落日志归档 `docs/logs/m9d-latency-<date>.log`
+- 与 M7 单帧基线 `avg=19.38 p95=19.20 max=111.17` 对比，预算: read_state ×2（≈2-4ms RS485 同步读，**触觉数据搭便车，无额外 RS485 成本**）+ ROS publish ×7（4 JointState ≈ 100B + 2 HandTactile ≈ 2KB + 1 HandDiagnostics ≈ 300B，total in-process ≈ +1.5-2ms 含 HandTactile 序列化）→ M9 后 avg 估 23-27ms，p95 估 26-29ms，距 SPEC §9 50ms 阈值仍留 40%+ 余量
+- 触觉 publish 单独 latency contribution 通过 `--no-tactile` flag A/B 对比测一次（M9d 同 session 内连跑两段）：开/关 HandTactile publish 各 30s，latency 差值即为 tactile 序列化 + publish 开销，纳入 ADR-04x 决策依据
+- 若 p95 > 40ms: 走 ADR-04x 降级路径，按优先级：
+  1. **tactile raw_force 降到 30Hz**（保留 calc_force 100Hz；3 tick 才 publish 一次 HandTactile.raw_force[1800]，msg 字段加 `uint8 raw_force_skipped_ticks` 让 dataloader 知道几 tick 无 raw）
+  2. **state 降到 30Hz**（沿用原 M9d 第 3 选项；read_state 每 3 tick 调一次；dataloader 侧 interpolate）
+  3. 两者并用
+- 验收: latency 报告 + 与 M7 baseline 对比表入 plan §execution-record；A/B 触觉开关对比入 plan §execution-record；落日志归档 `docs/logs/m9d-latency-<date>.log` + `docs/logs/m9d-latency-no-tactile-<date>.log`
 
 ### M9e · rosbag 录制 + 端到端验收（0.25d）
-- 起独立 `ros2 bag record -o /var/log/udex_to_xhand/teleop-<ISO8601> /xhand/left/command /xhand/left/state /xhand/right/command /xhand/right/state /xhand/diagnostics`（`/var/log/udex_to_xhand/` 提前创建 + `chown` 当前用户）
-- 跑一段 60s 双手 teleop，含 M8 抓杯流程（XHand 装在 G1 末端 → 抓桌上杯子 → 保持 3s → 放下）
+- 起独立 `ros2 bag record -o /var/log/udex_to_xhand/teleop-<ISO8601> /xhand/left/command /xhand/left/state /xhand/left/tactile /xhand/right/command /xhand/right/state /xhand/right/tactile /xhand/diagnostics`（`/var/log/udex_to_xhand/` 提前创建 + `chown` 当前用户；**7 个 topic**，比原 plan 多 2 个 tactile）
+- 跑一段 60s 双手 teleop，含 M8 抓杯流程（XHand 装在 G1 末端 → 抓桌上杯子 → 保持 3s → 放下）。**抓杯期间是触觉数据高价值窗口** — 杯壁接触瞬间 calc_force.fz 应出现明显跃升，raw_force[120] 应在与杯壁接触的 taxel 上集中出现非零值；持杯 3s 期间力数据稳定；放下瞬间力归零。这是 BC/IL 训练样本里最关键的标注信号，M9e bag 录到这一段即对得起整个 M9 工程投入
 - bag 落盘验证:
-  - `ros2 bag info <path>` 输出 5 个 topic，各 ≈ 6000 messages（100Hz × 60s），无 dropped messages 警告
-  - `ros2 bag play <path>` + `ros2 topic echo /xhand/left/command` 可正确重放
-  - 抽 1 帧用 `ros2 bag info --verbose` 看 `header.stamp` 与 `receive_stamp` 字段，确认同帧 `/xhand/*/command` + `/xhand/*/state` 的 stamp 一致
-- 师兄侧 dataloader 试加载: bag 拷给师兄，验证他的 BC 训练 pipeline 能识别 `sensor_msgs/JointState` 并读出 `(left.command, left.state, right.command, right.state)` 四元组，且与机器人侧 bag 的 robot action 在同一 `/clock` 时间轴上无明显错位（visually compare timeline in `rqt_bag` 或写一个 ros2 python script 抽 sample）
+  - `ros2 bag info <path>` 输出 **7 个 topic**，各 ≈ 6000 messages（100Hz × 60s），无 dropped messages 警告
+  - bag 体积预估 ≈ 50 MB（4 JointState ~10MB + 2 HandTactile ~25MB + 1 diagnostics ~5MB + storage overhead）；`du -sh <bag>` 实测应在 30-80 MB 区间，超 100 MB 触发 ADR-046 (mcap vs sqlite3 storage backend) 复审
+  - `ros2 bag play <path>` + `ros2 topic echo /xhand/left/command` + `ros2 topic echo /xhand/left/tactile` 可正确重放
+  - 抽 1 帧用 `ros2 bag info --verbose` 看 `header.stamp` 与 `receive_stamp` 字段，确认同帧 `/xhand/*/command` + `/xhand/*/state` + `/xhand/*/tactile` **三个 topic** 的 stamp 一致（M9c 设计意图：同 tick 同 stamp）
+  - 写一个简短 Python script (`scripts/bag_verify_contact_signal.py`) 抽抓杯段（按 M9d session log 标的时间戳） + 校验 `/xhand/left/tactile.calc_force[8..11]`（index 指尖 fz, 5×3=15 数组里 thumb 0-2 / index 3-5 / mid 6-8 / ring 9-11 / pinky 12-14）在持杯期间是否 > 0
+- 师兄侧 dataloader 试加载: bag 拷给师兄，验证他的 BC 训练 pipeline 能识别 `sensor_msgs/JointState` + `udex_to_xhand_msgs/HandTactile` 并读出 `(left.command, left.state, left.tactile, right.command, right.state, right.tactile)` 六元组，且与机器人侧 bag 的 robot action 在同一 `/clock` 时间轴上无明显错位（visually compare timeline in `rqt_bag` 或写一个 ros2 python script 抽 sample）；**师兄 dataloader 需 import `udex_to_xhand_msgs` 包**（msg 包 colcon build 产出 install/ 树即可），M9b 完工后即把 `udex_to_xhand_msgs/` 拷一份过去
 
 **完成定义**:
-- `ros2 bag info teleop-<...>` 显示 5 topic × ≈6000 msg，时间跨度 ≈60s，无 dropped messages
-- bag 内 `/xhand/*/command` 与 `/xhand/*/state` 在同一 tick 的 `header.stamp` 内成对出现（offline script 抽样验证）
-- 60s session 内含一次成功抓杯（M8 acceptance test 的子集，杯子离桌 ≥3s）
-- latency p95 < 30ms（M7 baseline + ROS publish + read_state 后）；avg / p95 / max 入 ADR-04x 记录基线
-- 师兄确认能用他的 dataloader 加载本 bag 与机器人 bag、双方 action sequence 在同一 `/clock` 时间轴上无明显错位（书面确认入 plan §execution-record）
+- `ros2 bag info teleop-<...>` 显示 **7 topic** × ≈6000 msg，时间跨度 ≈60s，无 dropped messages
+- bag 内 `/xhand/*/command` + `/xhand/*/state` + `/xhand/*/tactile` 在同一 tick 的 `header.stamp` 内**三个 topic 成对**出现（offline script 抽样验证）
+- 60s session 内含一次成功抓杯（M8 acceptance test 的子集，杯子离桌 ≥3s）+ **抓杯期间触觉 calc_force.fz 跃升信号可见**（bag_verify_contact_signal.py 自动校验）
+- latency p95 < 30ms（M7 baseline + ROS publish + read_state + tactile 序列化后）；avg / p95 / max 入 ADR-04x 记录基线
+- 师兄确认能用他的 dataloader 加载本 bag（含 `udex_to_xhand_msgs/HandTactile`）与机器人 bag、双方 action sequence 在同一 `/clock` 时间轴上无明显错位（书面确认入 plan §execution-record）
 
 ```bash
 # M9a — ROS2 安装 + verify（distro 占位为 humble，待 M9a 确认后替换）
@@ -463,41 +490,46 @@ ros2 topic echo /chatter   # 应能 echo
 colcon build --packages-select udex_to_xhand_msgs
 source install/setup.bash
 ros2 interface show udex_to_xhand_msgs/msg/HandDiagnostics
+ros2 interface show udex_to_xhand_msgs/msg/HandTactile      # M9 触觉扩展
 
 # M9c — udex_to_xhand 作为 ROS2 node
 colcon build --packages-select udex_to_xhand
 ros2 run udex_to_xhand udex_to_xhand --config config.yaml
 # 另一终端
 ros2 topic hz /xhand/left/command      # 期望 ~100Hz
+ros2 topic hz /xhand/left/tactile      # 期望 ~100Hz（与 command 同频，证明 read_state 触觉通道打通）
 ros2 topic echo /xhand/left/state      # 应见 12 position + 12 effort
+ros2 topic echo /xhand/left/tactile --once   # 应见 calc_force[15] + raw_force[1800] + temperature[100] + calc_temperature[5]
 ros2 topic echo /xhand/diagnostics
 
-# M9e — 录制 + 抓杯验收
+# M9e — 录制 + 抓杯验收（7 个 topic）
 mkdir -p /var/log/udex_to_xhand
 ros2 bag record -o /var/log/udex_to_xhand/teleop-$(date -Iseconds) \
-    /xhand/left/command /xhand/left/state \
-    /xhand/right/command /xhand/right/state \
+    /xhand/left/command  /xhand/left/state  /xhand/left/tactile \
+    /xhand/right/command /xhand/right/state /xhand/right/tactile \
     /xhand/diagnostics &
 ros2 run udex_to_xhand udex_to_xhand --config config.yaml --duration 60
 # 戴手套抓杯
 kill %1   # 停 bag
-ros2 bag info /var/log/udex_to_xhand/teleop-<latest>
+ros2 bag info /var/log/udex_to_xhand/teleop-<latest>   # 期望 7 topic × ~6000 msg
+python3 scripts/bag_verify_contact_signal.py /var/log/udex_to_xhand/teleop-<latest>  # 期望: 抓杯段 calc_force.fz > 0
 ```
 
 **依赖**: M7（双手集成已通过）、M8（抓杯 acceptance — 是本 milestone 录制场景的内容）、ROS2 已装在 PC2
 
 **ADRs**:
-- ADR-043: relax CLAUDE.md «Do NOT use ROS2» — 仅限 M9 数据记录路径（rclcpp + sensor_msgs + rosbag2），不含 ros2_control / ros2_controllers / lifecycle_node 等控制框架
-- ADR-044: relax CLAUDE.md «Do NOT read XHand sensors / force feedback» — 仅限 offline observation publish，`read_state` 结果只进 ROS topic，禁止被 `joint_mapper` / `safety` / `main` 控制路径引用
+- ADR-043: relax CLAUDE.md «Do NOT use ROS2» — 仅限 M9 数据记录路径（rclcpp + sensor_msgs + rosbag2 + 自定义 `udex_to_xhand_msgs`），不含 ros2_control / ros2_controllers / lifecycle_node 等控制框架
+- ADR-044: relax CLAUDE.md «Do NOT read XHand sensors / force feedback» — 仅限 offline observation publish，`read_state` 返回的**整个 `HandState_t`（关节 finger_state[12] + 触觉 sensor_data[5]）**只进 ROS topic，禁止被 `joint_mapper` / `safety` / `main` 控制路径引用。一条 ADR 同时覆盖关节 state + 触觉两类 observation
 - ADR-045（M9a 后落）: ROS2 distro 选型 + `/clock` 同步策略（与机器人侧 sim_time 对齐 vs PC2 wall clock + QoS 选择理由）
-- ADR-046（M9b 后落）: rosbag2 storage backend 选型（sqlite3 default vs mcap）
-- ADR-047（M9d 后落，条件性）: 若 latency p95 > 30ms → state 降频策略 + dataloader 侧 interpolation 约定
+- ADR-046（M9b 后落）: rosbag2 storage backend 选型（sqlite3 default vs mcap）— M9 触觉扩展把 bag 单 session 体积推到 30–80 MB 区间（M8 之前估计 < 20 MB），mcap 的 readback throughput 优势可能在此 tip 过来；M9e 实测后落
+- **ADR-057（M9b 后落，2026-05-25 触觉扩展新增）**：`udex_to_xhand_msgs/HandTactile.msg` schema 设计 — int8/int16 packed 数组而非 `sensor_msgs/Float32MultiArray`（前者节省 ~4× 序列化体积，对 raw_force[1800] 关键）；与 `HandDiagnostics` 解耦的理由（触觉是高频高维 observation，diagnostics 是低维 metadata；解耦后 dataloader 不必拉 diagnostics 就能拿 tactile）；与 `JointState` 解耦的理由（JointState schema 不天然支持 3D force vector 数组）；taxel 2D 布局的 row-major 约定 + 在指尖表面坐标系的方向定义（链 SDK 文档 / 实测标注，避免训练 pipeline 误读）
+- ADR-047（M9d 后落，条件性）: 若 latency p95 > 40ms → 触觉 raw_force 降到 30Hz / state 降到 30Hz 的降频策略 + dataloader 侧 interpolation 约定（M9 触觉扩展增加 publish 路径开销 ~1.5-2ms，降频优先级 tactile > state，因 calc_force.fz 是抓杯关键信号、不能丢；state 关节角时序连续性更强、interpolate 失真小）
 
 **Post-M9 文档同步（落 M9 ✅ 时一并完成）**:
-- CLAUDE.md «Constraints — do NOT» 段两条（read XHand sensors / use ROS2）改为「除 M9 数据记录路径外不得使用」并 link ADR-043/044
-- CLAUDE.md «Architecture» 段加 ROS2 publish 数据流分支 + `udex_to_xhand_msgs/` 包说明
-- SPEC.md 增 §13「数据采集 schema」章节，落 topic 列表 / msg 结构 / bag 命名规约 / `/clock` 约定
-- README 增加 ROS2 build + run 流程（`colcon build` 取代 `cmake .. && make`） — 注：完整 README 重写见 M10
+- CLAUDE.md «Constraints — do NOT» 段两条（read XHand sensors / use ROS2）改为「除 M9 数据记录路径外不得使用」并 link ADR-043/044；read XHand sensors 一条明确：「关节 state 与触觉 sensor_data 同 scope，都禁止接入控制环」
+- CLAUDE.md «Architecture» 段加 ROS2 publish 数据流分支 + `udex_to_xhand_msgs/` 包说明（含 `HandTactile.msg`）
+- SPEC.md 增 §13「数据采集 schema」章节，落 **7 topic** 列表 / msg 结构（含 HandTactile） / bag 命名规约 / `/clock` 约定 / 触觉 calc_force 与 raw_force 的坐标系定义 + 5 sensor 与解剖学指尖的对应
+- README 增加 ROS2 build + run 流程（`colcon build` 取代 `cmake .. && make`） + 触觉数据 readback 章节（`bag_verify_contact_signal.py` 用法 + 训练侧 Python 示例） — 注：完整 README 重写见 M10
 
 ---
 
