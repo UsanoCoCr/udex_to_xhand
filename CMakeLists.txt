@@ -76,3 +76,30 @@ if(BUILD_TESTS)
     target_include_directories(test_safety PRIVATE src)
     target_compile_options(test_safety PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+# -----------------------------------------------------------------------------
+# Additive target: LeRobot binary-hand → XHand bridge (2026-06-28).
+# Second, fully independent input path. Does NOT modify the udex_to_xhand target
+# above; reuses xhand_driver + safety. Reads a realtime LeRobot action UDP/JSON
+# stream and drives XHand grasp/open from action[36]/[37].
+# See docs/superpowers/specs/2026-06-28-lerobot-binary-hand-sdk-design.md.
+# -----------------------------------------------------------------------------
+add_executable(lerobot_to_xhand
+    src/lerobot_hand_main.cpp
+    src/lerobot_receiver.cpp
+    src/lerobot_hand_controller.cpp
+    src/xhand_driver.cpp
+    src/safety.cpp)
+
+target_include_directories(lerobot_to_xhand PRIVATE
+    src
+    ${CMAKE_SOURCE_DIR}/xhand_control_sdk/include)
+
+target_link_libraries(lerobot_to_xhand PRIVATE
+    xhand_control
+    CURL::libcurl
+    nlohmann_json::nlohmann_json
+    yaml-cpp)
+
+target_link_options(lerobot_to_xhand PRIVATE -Wl,--disable-new-dtags)
+target_compile_options(lerobot_to_xhand PRIVATE -Wall -Wextra -Wpedantic)
